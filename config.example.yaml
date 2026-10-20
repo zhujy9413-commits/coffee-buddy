@@ -1,0 +1,6 @@
+# 声明式配置（可选）；环境变量优先于本文件
+model: deepseek-chat
+max_tokens: 2000
+timeout_seconds: 120
+max_retries: 3
+base_delay_seconds: 0.5

@@ -1,0 +1,15 @@
+# 密钥与本地配置（绝不能提交到仓库）
+.env
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 运行时数据与轨迹（个人记录，留在本地）
+data/
+.trajectories/
+
+# macOS
+.DS_Store
