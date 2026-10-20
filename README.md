@@ -1,5 +1,9 @@
 # ☕ 咖啡探索搭子（Coffee Buddy）
 
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
+![Tests](https://github.com/zhujy9413-commits/coffee-buddy/actions/workflows/test.yml/badge.svg)
+
 一个**个人 Agent**：整理咖啡馆、豆单与菜单，记住口味偏好，推荐下一次尝试并解释理由。
 
 由 [Agent Blueprint](../agent-blueprint/) 推导出的 **Step 5 骨架**（第一层「骨架」），集成 8 个组件：
