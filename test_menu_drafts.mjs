@@ -23,3 +23,10 @@ test('photo output only supplies product facts and receives fresh IDs',()=>{
   assert.notEqual(row.id,'untrusted');assert.equal(row.product,'测试豆');assert.equal(row.roast,'未知');
   for(const key of ['kind','reaction','cafe','owner'])assert.equal(row[key],undefined);
 });
+test('photo review retains transcription but cannot import judgments or arbitrary review fields',()=>{
+  const row=draftsFromItems([{product:'待核对产品',source_text:'待核对产品 42',review_fields:['product','batch','owner','product'],
+    review_notes:['价格不是批次',null],photo_key:'photo-1:0',reviewed:true,owner:'other'}],makeId)[0];
+  assert.deepEqual(row.review_fields,['product','batch']);assert.deepEqual(row.review_notes,['价格不是批次']);
+  assert.equal(row.source_text,'待核对产品 42');assert.equal(row.photo_key,'photo-1:0');
+  assert.equal(row.reviewed,undefined);assert.equal(row.owner,undefined);
+});

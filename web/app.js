@@ -1,5 +1,5 @@
 import {getCurrentLocation, prefersDeviceLocation} from './location.js';
-import {tastingDraft,photoMenuDraft} from './journal.js';
+import {tastingDraft} from './journal.js';
 import {initMenuBatch} from './menu-batch.js';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -8,7 +8,7 @@ let currentTab = 'nearby', selectedBrew = '冰美式', center = null, recordLoca
 const brewDescriptions = {'冰美式':'日常的清醒','手冲':'留一点慢时间','热美式':'热饮也合适','冷萃':'换个口味试试','意式浓缩':'浓缩的一杯'};
 const preferenceLabels = {any:'黑咖、奶咖都可以',black:'只喝黑咖',milk:'只喝奶咖'};
 let draftBrews = [], draftCategories = {};
-let draftCategory=null, recommendationsDirty=false, demoInitialized=false, photoItems=[], photoVersion=0, photoBusy=false, photoBatchAdded=false;
+let draftCategory=null, recommendationsDirty=false, demoInitialized=false, photoItems=[], photoWarnings=[], photoVersion=0, photoBusy=false, photoBatchAdded=false;
 const searchLabels={nearby:'就近原则',taste:'口味原则',destination:'想去哪就去哪'};
 const searchDescriptions={nearby:'先看距离，结果不足时再向外找，口味作为参考。',taste:'先看有依据的口味匹配，距离只作参考。可以从已有记录里找，也可以选地点扩展查询。',destination:'你来定城市和目的地，围绕那里找咖啡。无需获取当前位置。'};
 let resultMeta={};
@@ -237,7 +237,7 @@ function prefillCafe(cafe,kind) { resetForm();$('#kind').value=kind;$('#cafe').v
 ['#cafe','#address'].forEach(id=>$(id).addEventListener('input',()=>{recordLocation=null;$('#record-form').elements.provider_id.value='';}));
 $('#photo').addEventListener('change',async e=>{
   const version=++photoVersion;
-  photoBusy=false;photoBatchAdded=false;$('#photo-batch').textContent='将全部识别结果加入豆单草稿';
+  photoBusy=false;photoBatchAdded=false;photoWarnings=[];$('#photo-batch').textContent='将全部识别结果加入豆单草稿';
   const file=e.target.files[0];photoData=null;photoItems=[];$('#photo-batch').hidden=true;$('#extract').disabled=true;$('#photo-preview').hidden=true;$('#photo-items').replaceChildren();
   if(!file)return;
   if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>15*1024*1024){status('#photo-status','请选择小于 15 MB 的 JPG、PNG 或 WebP 图片。',true);return;}
@@ -260,16 +260,13 @@ $('#extract').addEventListener('click',async()=>{
   $('#extract').disabled=true;status('#photo-status','正在识别，请稍候……');
   try{
     const result=await api('/api/extract',{image:photoData});if(version!==photoVersion)return;
-    photoItems=result.items;$('#photo-batch').hidden=!photoItems.length;status('#photo-status',result.uncertain);
-    $('#photo-items').innerHTML=result.items.length?result.items.map((p,i)=>`<button type="button" class="photo-item" data-photo-item="${i}">${esc(p.product||p.bean||'未命名项目')} · 填入表单 ↗</button>`).join(''):'<p class="hint">没有识别出清晰的产品文字，可尝试更清楚的照片。</p>';
+    photoItems=result.items.map((item,index)=>({...item,photo_key:`${version}:${index}`}));
+    photoWarnings=Array.isArray(result.review?.warnings)?result.review.warnings:[];
+    $('#photo-batch').hidden=!photoItems.length;status('#photo-status',[...photoWarnings,result.uncertain].join(' '));
+    $('#photo-items').innerHTML=photoItems.length?photoItems.map((p,i)=>`<button type="button" class="photo-item" data-photo-item="${i}"><strong>${esc(p.product||p.bean||'名称待填写')}</strong>${p.review_fields?.length?'<span class="review-badge">有待核对项</span>':''}<span>核对这一款 ↗</span></button>`).join(''):'<p class="hint">没有识别出清晰的产品文字，可尝试更清楚的照片。</p>';
     $$('[data-photo-item]').forEach(b=>b.onclick=()=>{
-      const item=result.items[Number(b.dataset.photoItem)];
-      const form=$('#record-form'),context=Object.fromEntries(['cafe','address','provider_id','source_note','brew'].map(key=>[key,form.elements.namedItem(key).value]));
-      const draft=photoMenuDraft(item,{...context,location:recordLocation},localDate());
-      resetForm();syncBrewOptions(draft.brew);
-      for(const [key,value] of Object.entries(draft)){const field=form.elements.namedItem(key);if(field)field.value=Array.isArray(value)?value.join('、'):value??'';}
-      recordLocation=draft.location;$('#form-title').textContent='核对照片里的资料。';syncKind();
-      toast('已生成新的豆单草稿，请核对后保存');
+      const item=photoItems[Number(b.dataset.photoItem)];
+      if(menuBatch.addPhotoItems([item],{image:photoData,warnings:photoWarnings}))photoBatchAdded=true;
     });
   }catch(e){if(version===photoVersion)status('#photo-status',e.message,true);}finally{if(version===photoVersion){photoBusy=false;$('#extract').disabled=!photoData||!state.services.vision;}}
 });
@@ -279,6 +276,6 @@ $('#prefs-form').addEventListener('submit',async e=>{e.preventDefault();const f=
 $('#export').onclick=async()=>{try{const data=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='coffee-buddy-'+localDate()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){toast(e.message);}};
 $('#import-file').addEventListener('change',async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>6*1024*1024)throw new Error('备份文件过大');const data=JSON.parse(await file.text());const restorePreferences=data.preferences!==undefined;if(!confirm('将备份记录合并到当前记录中？相同编号的记录会更新，其他记录保留。'+(restorePreferences?'备份中的口味偏好和咖啡类型也将替换当前设置。':'')))return;const result=await api('/api/import',data);recommendationsDirty=true;await refresh();toast(`已导入 ${result.count} 条记录${restorePreferences?'，并恢复偏好设置':''}`);}catch(error){toast(error.message);}finally{e.target.value='';}});
 const menuBatch=initMenuBatch({getState:()=>state,getContext:()=>({cafe:$('#cafe').value,address:$('#address').value,source_note:$('#source_note').value,provider_id:$('#record-form').elements.provider_id.value,location:recordLocation}),api,today:localDate,toast,onSaved:async()=>{recommendationsDirty=true;$('#filter-text').value='';$('#filter-brew').value='';$('#filter-reaction').value='';$('#filter-roast').value='';await refresh();if(photoBatchAdded){photoItems=[];photoBatchAdded=false;$('#photo-batch').hidden=true;$('#photo-items').replaceChildren();}tab('history');}});
-$('#photo-batch').onclick=()=>{if(photoBatchAdded&&menuBatch.hasDrafts()){menuBatch.open();return;}if(menuBatch.addPhotoItems(photoItems)){photoBatchAdded=true;$('#photo-batch').textContent='继续核对照片豆单';}};
+$('#photo-batch').onclick=()=>{if(menuBatch.addPhotoItems(photoItems,{image:photoData,warnings:photoWarnings})){photoBatchAdded=true;$('#photo-batch').textContent='继续核对照片豆单';}};
 resetForm();
 refresh().catch(e=>{status('#location-status','无法连接本地服务：'+e.message,true);toast('加载失败，请确认本地服务正在运行后刷新页面。');});

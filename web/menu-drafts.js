@@ -1,11 +1,16 @@
 const roasts=new Set(['未知','浅烘','中浅烘','中烘','中深烘','深烘']);
 const fields=['product','bean','roaster','origin','processing','batch','brew'];
+const reviewable=new Set([...fields,'roast','label_flavors']);
 
 export function draftsFromItems(items, makeId=()=>crypto.randomUUID()) {
   if(!Array.isArray(items)||!items.length||items.length>20)throw new Error('一次请核对 1–20 款产品');
   return items.map(item=>({id:makeId(),...Object.fromEntries(fields.map(key=>[key,typeof item[key]==='string'?item[key].trim():''])),
     roast:roasts.has(item.roast)?item.roast:'未知',
-    label_flavors:Array.isArray(item.label_flavors)?item.label_flavors.filter(x=>typeof x==='string').join('、'):''}));
+    label_flavors:Array.isArray(item.label_flavors)?item.label_flavors.filter(x=>typeof x==='string').join('、'):'',
+    review_fields:Array.isArray(item.review_fields)?[...new Set(item.review_fields.filter(x=>reviewable.has(x)))]:[],
+    review_notes:Array.isArray(item.review_notes)?item.review_notes.filter(x=>typeof x==='string').slice(0,8).map(x=>x.slice(0,300)):[],
+    source_text:typeof item.source_text==='string'?item.source_text.slice(0,600):'',
+    photo_key:typeof item.photo_key==='string'?item.photo_key.slice(0,80):''}));
 }
 
 export function parseMenuText(raw, brew='', makeId=()=>crypto.randomUUID()) {

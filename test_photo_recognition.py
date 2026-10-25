@@ -6,7 +6,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from web_core import AppError, extract_photo, photo_model_request
+from web_core import AppError, extract_photo, photo_model_request, photo_item_draft
 
 
 IMAGE = 'data:image/jpeg;base64,' + base64.b64encode(b'\xff\xd8\xfftest-image').decode()
@@ -19,6 +19,38 @@ def response(items, **choice):
 
 
 class PhotoRecognitionTests(unittest.TestCase):
+    def test_menu_price_cannot_become_batch_and_drink_cannot_become_unmarked_bean(self):
+        item = photo_item_draft({'product': '测试特调', 'bean': '测试特调 42', 'batch': '42',
+            'source_text': '测试特调 42', 'evidence': {'product': '测试特调 42', 'bean': '测试特调 42', 'batch': '42'}}, 'drink_menu', ['handwritten'])
+        self.assertEqual((item['bean'], item['batch']), ('', ''))
+        self.assertEqual(item['source_text'], '测试特调 42')
+        self.assertTrue({'product', 'bean', 'batch'} <= set(item['review_fields']))
+
+    def test_explicit_numeric_lot_and_explicit_bean_survive_review(self):
+        item = photo_item_draft({'product': '测试手冲', 'bean': '云端拼配', 'batch': '42',
+            'evidence': {'product': '测试手冲', 'bean': '使用豆：云端拼配', 'batch': 'LOT 42'}}, 'drink_menu', [])
+        self.assertEqual((item['bean'], item['batch']), ('云端拼配', '42'))
+        self.assertNotIn('batch', item['review_fields'])
+
+    def test_uncertain_transcription_can_be_corrected_without_guessing_a_product(self):
+        payload = {'document_type': 'drink_menu', 'quality': ['handwritten', 'tilted', 'untrusted'],
+            'items': [{'product': '', 'source_text': '?? 42', 'review_fields': ['product', 'owner']} ]}
+        response_data = {'choices': [{'message': {'content': json.dumps(payload)}}]}
+        with patch.dict(os.environ, ENV, clear=True), patch('web_core.photo_model_request', return_value=response_data):
+            result = extract_photo({'image': IMAGE})
+        self.assertEqual(result['items'][0]['product'], '')
+        self.assertEqual(result['items'][0]['review_fields'], ['product'])
+        self.assertEqual(len(result['review']['warnings']), 2)
+        self.assertEqual(result['items'][0]['source_text'], '?? 42')
+
+    def test_malformed_optional_model_fields_do_not_destroy_other_products(self):
+        item = photo_item_draft({'product': '测试', 'bean': {'invalid': True}, 'label_flavors': [None, {}],
+            'source_text': [], 'evidence': ['bad'], 'review_fields': ['product', []]}, 'drink_menu', [])
+        self.assertEqual(item['product'], '测试')
+        self.assertEqual(item['bean'], '')
+        self.assertEqual(item['label_flavors'], [])
+        self.assertIn('label_flavors', item['review_fields'])
+
     def test_auth_quota_and_model_errors_are_actionable_and_never_echo_provider_body(self):
         for code, hint in [(401, '密钥'), (403, '权限'), (402, '额度'), (404, '接口'), (429, '额度'), (400, '图片'), (500, '暂时')]:
             error = urllib.error.HTTPError(ENV['VISION_ENDPOINT'], code, 'private-provider-message', {}, io.BytesIO(b'test-private-key'))
