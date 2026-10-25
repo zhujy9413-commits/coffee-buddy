@@ -3,6 +3,8 @@
 !docker_entrypoint.py
 !cloud_preview.py
 !cloud_storage.py
+!postgres_store.py
+!requirements-cloud.txt
 !storage_backup.py
 !web_app.py
 !web_core.py

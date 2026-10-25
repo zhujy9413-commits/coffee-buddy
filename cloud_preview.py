@@ -13,6 +13,7 @@ from cloud_storage import open_cloud_store
 
 NOTICE = '云端测试版：使用独立测试数据；休眠、重启或重新部署后记录可能清空。重要记录请及时导出备份。'
 PERSISTENT_NOTICE = '云端个人版：记录保存在持久磁盘，重启和重新部署后保留。每天自动生成数据库备份；仍请定期导出到自己的设备。'
+POSTGRES_NOTICE = '云端持久保存：记录保存在独立数据库，网页休眠、重启和更新后保留。免费额度有限；仍请定期导出备份。'
 
 
 def cloud_settings(env):
@@ -66,6 +67,9 @@ def make_cloud_handler(store, hostname, password, backups=None):
             self.need_auth = status == 401
             if status == 200 and urlsplit(self.path).path == '/api/state' and isinstance(data, dict):
                 deployment = {'mode': 'cloud-preview', 'ephemeral': True, 'notice': NOTICE}
+                if getattr(store, 'storage_backend', None) == 'postgres':
+                    deployment = {'mode': 'cloud-personal', 'backend': 'postgres', 'ephemeral': False,
+                                  'notice': POSTGRES_NOTICE}
                 if backups is not None:
                     deployment = {'mode': 'cloud-personal', 'ephemeral': False, 'notice': PERSISTENT_NOTICE,
                                   'backup': backups.status()}

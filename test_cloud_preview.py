@@ -148,6 +148,20 @@ class CloudPreviewTests(unittest.TestCase):
         for route in ['/cloud_storage.py', '/storage_backup.py', '/var/data/coffee-buddy/coffee.sqlite3', '/backups/coffee.sqlite3']:
             self.assertEqual(self.request(route, auth=self.auth)[0], 404)
 
+    def test_remote_database_notice_does_not_claim_disk_or_daily_backups(self):
+        # The HTTP deployment metadata must describe external storage accurately.
+        self.store.storage_backend = 'postgres'
+        status, _, body = self.request('/api/state', auth=self.auth)
+        deployment = json.loads(body)['deployment']
+        self.assertEqual(status, 200)
+        self.assertFalse(deployment['ephemeral'])
+        self.assertEqual(deployment['backend'], 'postgres')
+        self.assertIn('独立数据库', deployment['notice'])
+        self.assertNotIn('backup', deployment)
+        self.assertNotIn('DATABASE_URL', body.decode())
+        for route in ['/postgres_store.py', '/requirements-cloud.txt']:
+            self.assertEqual(self.request(route, auth=self.auth)[0], 404)
+
 
 if __name__ == '__main__':
     unittest.main()

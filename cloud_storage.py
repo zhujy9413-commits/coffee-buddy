@@ -17,8 +17,13 @@ EPHEMERAL_ROOT = Path('/tmp/coffee-buddy-cloud-preview')
 
 def open_cloud_store(env):
     mode = env.get('COFFEE_STORAGE_MODE', 'ephemeral')
-    if mode not in ('ephemeral', 'persistent'):
+    if mode not in ('ephemeral', 'persistent', 'postgres'):
         raise ValueError('云端存储模式无效')
+    if env.get('DATABASE_URL') and mode != 'postgres':
+        raise ValueError('已配置独立数据库，请设置 COFFEE_STORAGE_MODE=postgres；不会写入临时目录')
+    if mode == 'postgres':
+        from postgres_store import PostgresStore
+        return PostgresStore(env.get('DATABASE_URL', '')), None
     if mode == 'ephemeral':
         return Store(EPHEMERAL_ROOT / 'coffee.sqlite3'), None
     # Never silently create a normal directory and label it persistent.

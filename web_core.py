@@ -199,12 +199,12 @@ class Store:
         def entity(name, fields):
             payload = {k: item[k] for k in fields}
             key = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:24]
-            con.execute("INSERT OR REPLACE INTO " + name + " VALUES (?,?,?)", (owner, key, json.dumps(payload, ensure_ascii=False)))
+            con.execute("INSERT INTO " + name + " VALUES (?,?,?) ON CONFLICT(owner,id) DO UPDATE SET data=excluded.data", (owner, key, json.dumps(payload, ensure_ascii=False)))
             return key
         cafe_id = entity("cafes", ("cafe", "address", "provider_id", "location")) if item["cafe"] else None
         bean_id = entity("beans", ("bean", "roaster", "origin", "processing", "batch", "roast", "label_flavors")) if item["bean"] else None
         item["cafe_id"], item["bean_id"] = cafe_id, bean_id
-        con.execute("INSERT OR REPLACE INTO entries VALUES (?,?,?,?,?)", (owner, item["id"], cafe_id, bean_id, json.dumps(item, ensure_ascii=False)))
+        con.execute("INSERT INTO entries VALUES (?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET cafe_id=excluded.cafe_id,bean_id=excluded.bean_id,data=excluded.data", (owner, item["id"], cafe_id, bean_id, json.dumps(item, ensure_ascii=False)))
         return item
 
     def save(self, owner, data):

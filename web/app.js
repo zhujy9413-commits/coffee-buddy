@@ -37,7 +37,7 @@ async function refresh() {
   $('#deployment-notice').hidden=!cloud&&!demo;
   $('#deployment-notice').textContent=cloud?.notice||state.demo?.notice||'';
   if(persistent&&cloud.backup?.status==='error') $('#deployment-notice').textContent+=' 自动备份暂未完成，请先导出备份。';
-  $('#storage-hint').textContent=demo?'演示资料保存在独立测试库，不会修改个人记录。产品与配方均为虚构，不代表店铺实际菜单或在售情况。':persistent?'记录保存在云端持久磁盘，每天自动备份，最多保留 14 份。自动备份与原数据在同一磁盘，请定期导出到自己的设备。不同浏览器的记录分别保留；更换设备或清除 Cookie 前请导出备份。':cloud?'记录暂存在云端测试数据库，休眠、重启或重新部署后可能清空。不同浏览器的记录分别保留；请及时导出备份。':'记录保存在这台电脑的本地数据库。浏览器身份不同，记录分别保留；清除 Cookie 前请导出备份。';
+  $('#storage-hint').textContent=demo?'演示资料保存在独立测试库，不会修改个人记录。产品与配方均为虚构，不代表店铺实际菜单或在售情况。':persistent&&cloud.backend==='postgres'?'记录保存在独立云端数据库，网页休眠、重启和更新后保留。免费额度有限，请定期导出到自己的设备。不同浏览器的记录分别保留；更换设备或清除 Cookie 前请导出备份。':persistent?'记录保存在云端持久磁盘，每天自动备份，最多保留 14 份。自动备份与原数据在同一磁盘，请定期导出到自己的设备。不同浏览器的记录分别保留；更换设备或清除 Cookie 前请导出备份。':cloud?'记录暂存在云端测试数据库，休眠、重启或重新部署后可能清空。不同浏览器的记录分别保留；请及时导出备份。':'记录保存在这台电脑的本地数据库。浏览器身份不同，记录分别保留；清除 Cookie 前请导出备份。';
   $('#edition-label').textContent=demo?'本机独立演示版 · 虚构测试资料':persistent?'云端个人版 · 记录持续保存':cloud?'云端测试版 · 请及时导出备份':'本机开发版 · 记录由你掌握';
   $('#record-count').textContent=state.records.length;
   $('#taste-tags').innerHTML=formatTags([...(state.preferences.flavors||[]),...(state.preferences.roasts||[]),preferenceLabels[state.preferences.coffee_preference||'any']]);
