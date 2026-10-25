@@ -6,6 +6,8 @@
 
 独立虚构演示入口为 `http://localhost:8767/`，用 `python3 demo_app.py --port 8767` 启动；不读取个人库和密钥配置。批量豆单流程见 [MENU_BATCH.md](MENU_BATCH.md)。
 
+2026-10-25 批量豆单与口味闭环已更新至原 <https://coffee-buddy-test.onrender.com>，运行提交 `e8c2171`；继续使用 Free 临时数据模式和原访问密码。本机数据与独立演示资料没有上传。线上验收通过，iPhone 批量真机测试待用户反馈。见 [CLOUD_TEST.md](CLOUD_TEST.md)。
+
 ## 运行
 
 使用 Python 3.9+，网页服务不需要安装额外依赖。
