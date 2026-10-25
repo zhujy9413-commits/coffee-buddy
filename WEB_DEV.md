@@ -97,4 +97,4 @@ node --test test_location.mjs test_amap_location.mjs
 
 ## 独立云端测试
 
-完整 HTTPS 测试版的部署准备见 [CLOUD_TEST.md](CLOUD_TEST.md)。使用独立后端入口及临时数据库，不改变上述本机启动方式。当前尚未部署；真实手机定位需在云端上线后核验。
+完整 HTTPS 测试版的部署准备见 [CLOUD_TEST.md](CLOUD_TEST.md)。使用独立后端入口及临时数据库，不改变上述本机启动方式。2026-10-25 已部署到 Render 并通过线上功能验收；真实手机登录和定位待 iPhone Safari 核验。

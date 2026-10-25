@@ -1,12 +1,20 @@
 # 独立 HTTPS 完整测试版
 
-状态：部署文件已准备；尚未创建云端服务或上传云端密钥。
+状态：2026-10-25 已部署并通过线上功能验收，iPhone 真实定位待用户测试。
+
+- 访问地址：<https://coffee-buddy-test.onrender.com>
+- Render 服务：`srv-dbeod2jrjlhs738be5eg`，工作区「家毅's workspace」，新加坡区 Free。
+- 部署版本：`397153620d9c411f2bc1c7878129bfe6d2d8dbcd`，首次部署已为 `live`；自动部署关闭。
+- 本次通过 Render 官方 CLI 创建服务；蓝图已通过平台校验，未另建 Blueprint 或其他资源。
+- 用户名为 `coffee`。访问密码只保存在云端环境变量和本机被 Git 忽略的 `data/cloud-preview/access.txt`，文件权限 600。请用 iPhone Safari 打开地址并输入访问凭据。
+- 已验证：未授权访问拒绝、HTTPS 健康检查、空记录、Secure Cookie、私有文件不可访问、跨站写入拒绝、记录新增/修改、导出/导入、真实高德地标查询及公开 WGS84 坐标转换。两条查店路径均返回 25 家候选；没有读取用户实际位置，验收记录已清理。
+- 本机内置预览在 HTTP 密码验证环节报 `ERR_INVALID_AUTH_CREDENTIALS`，未完成该浏览器的界面验收；线上接口验收通过，真实手机登录与 GPS 仍需验证。
 
 ## 服务与数据
 
 - Render Web Service，Docker 运行现有 Python 后端，新加坡区，`plan: free`。
 - `render.yaml` 关闭自动部署，不创建付费数据库、磁盘或其他服务。
-- 全站使用 HTTPS 和测试访问凭据；用户名为 `coffee`，密码由 Render 随机生成。
+- 全站使用 HTTPS 和测试访问凭据；用户名为 `coffee`，密码为随机生成的独立测试凭据，保存于云端环境变量。
 - 云端从空 SQLite 数据库开始。镜像只复制明确列出的源文件，不包含 `.env`、`data/`、轨迹或临时访问凭据。
 - 测试记录保存在云端临时磁盘。休眠、重启或重新部署会丢失；页面和备份区均提示及时导出。适合功能测试，不作为长期记录库。
 - 不同浏览器仍通过 Cookie 分开保存记录；访问密码是测试入口保护，不是正式用户账户系统。
