@@ -1,5 +1,11 @@
 # Coffee Buddy 手机网页 · 本机开发版
 
+当前维护目录为 `/Users/zhujiayi/Documents/ChatGPT/咖啡探索搭子 Coffee Buddy`，桌面原项目保留。新工作区没有复制 `.env` 或个人数据。云端持久存储已在本地实现，尚未启用，见 [PERSISTENT_STORAGE.md](PERSISTENT_STORAGE.md)。
+
+新增口味闭环开发入口为 `http://localhost:8766/`，见 [TASTE_LOOP.md](TASTE_LOOP.md)。当前已从桌面原库复制一致性快照和私有配置到新工作区，桌面原件保留。
+
+独立虚构演示入口为 `http://localhost:8767/`，用 `python3 demo_app.py --port 8767` 启动；不读取个人库和密钥配置。批量豆单流程见 [MENU_BATCH.md](MENU_BATCH.md)。
+
 ## 运行
 
 使用 Python 3.9+，网页服务不需要安装额外依赖。
@@ -97,4 +103,4 @@ node --test test_location.mjs test_amap_location.mjs
 
 ## 独立云端测试
 
-完整 HTTPS 测试版的部署准备见 [CLOUD_TEST.md](CLOUD_TEST.md)。使用独立后端入口及临时数据库，不改变上述本机启动方式。2026-10-25 已部署到 Render 并通过线上功能验收；真实手机登录和定位待 iPhone Safari 核验。
+完整 HTTPS 测试版的部署准备见 [CLOUD_TEST.md](CLOUD_TEST.md)。使用独立后端入口及临时数据库，不改变上述本机启动方式。2026-10-25 已部署到 Render 并通过线上功能验收；用户已反馈手机端测试无明显问题，GPS 单项结果与精度未另行留档。

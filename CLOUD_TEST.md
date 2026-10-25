@@ -1,6 +1,8 @@
 # 独立 HTTPS 完整测试版
 
-状态：2026-10-25 已部署并通过线上功能验收，iPhone 真实定位待用户测试。
+状态：2026-10-25 已部署并通过线上功能验收，用户已反馈手机端整体测试无明显问题，GPS 单项结果与精度未另留记录。
+
+后续开发：持久存储、每日备份和完整恢复已在本地实现并验证，尚未部署；当前线上仍为下面的临时数据模式。付费切换清单见 [PERSISTENT_STORAGE.md](PERSISTENT_STORAGE.md)。
 
 - 访问地址：<https://coffee-buddy-test.onrender.com>
 - Render 服务：`srv-dbeod2jrjlhs738be5eg`，工作区「家毅's workspace」，新加坡区 Free。

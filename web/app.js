@@ -1,4 +1,6 @@
 import {getCurrentLocation, prefersDeviceLocation} from './location.js';
+import {tastingDraft} from './journal.js';
+import {initMenuBatch} from './menu-batch.js';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let state = {records: [], preferences: {}, services: {}};
@@ -6,6 +8,7 @@ let currentTab = 'nearby', selectedBrew = '冰美式', center = null, recordLoca
 const brewDescriptions = {'冰美式':'日常的清醒','手冲':'留一点慢时间','热美式':'热饮也合适','冷萃':'换个口味试试','意式浓缩':'浓缩的一杯'};
 const preferenceLabels = {any:'黑咖、奶咖都可以',black:'只喝黑咖',milk:'只喝奶咖'};
 let draftBrews = [], draftCategories = {};
+let draftCategory=null, recommendationsDirty=false, demoInitialized=false, photoItems=[];
 const searchLabels={nearby:'就近原则',taste:'口味原则',destination:'想去哪就去哪'};
 const searchDescriptions={nearby:'先看距离，结果不足时再向外找，口味作为参考。',taste:'先看有依据的口味匹配，距离只作参考。可以从已有记录里找，也可以选地点扩展查询。',destination:'你来定城市和目的地，围绕那里找咖啡。无需获取当前位置。'};
 let resultMeta={};
@@ -24,18 +27,20 @@ async function api(path, body) {
   if (!response.ok) throw new Error(result.error || '操作未完成，请重试');
   return result;
 }
-function tab(name) { currentTab=name; $$('.view').forEach(e=>e.hidden=e.id!==name); $$('[data-tab]').forEach(e=>e.setAttribute('aria-selected',String(e.dataset.tab===name))); if(name==='nearby'&&center&&cafes.length) searchNearby(); }
+function tab(name) { currentTab=name; $$('.view').forEach(e=>e.hidden=e.id!==name); $$('[data-tab]').forEach(e=>e.setAttribute('aria-selected',String(e.dataset.tab===name))); if(name==='nearby'&&selectedBrew&&(center||searchMode()==='taste')&&(cafes.length||recommendationsDirty)) searchNearby(); }
 $$('[data-tab]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.tab)));
 $$('[data-action="record"]').forEach(b=>b.addEventListener('click',()=>tab('record')));
 async function refresh() {
   state=await api('/api/state');
-  const cloudPreview=state.deployment?.mode==='cloud-preview';
-  $('#deployment-notice').hidden=!cloudPreview;
-  $('#deployment-notice').textContent=cloudPreview?state.deployment.notice:'';
-  $('#storage-hint').textContent=cloudPreview?'记录暂存在云端测试数据库，休眠、重启或重新部署后可能清空。不同浏览器的记录分别保留；请及时导出备份。':'记录保存在这台电脑的本地数据库。浏览器身份不同，记录分别保留；清除 Cookie 前请导出备份。';
-  $('#edition-label').textContent=cloudPreview?'云端测试版 · 请及时导出备份':'本机开发版 · 记录由你掌握';
-  $('#record-count').textContent=state.records.filter(r=>r.kind==='tasting').length;
-  $('#taste-tags').innerHTML=formatTags([...(state.preferences.flavors||[]),preferenceLabels[state.preferences.coffee_preference||'any']]);
+  const cloud=state.deployment, persistent=cloud?.ephemeral===false;
+  const demo=state.demo?.enabled;
+  $('#deployment-notice').hidden=!cloud&&!demo;
+  $('#deployment-notice').textContent=cloud?.notice||state.demo?.notice||'';
+  if(persistent&&cloud.backup?.status==='error') $('#deployment-notice').textContent+=' 自动备份暂未完成，请先导出备份。';
+  $('#storage-hint').textContent=demo?'演示资料保存在独立测试库，不会修改个人记录。产品与配方均为虚构，不代表店铺实际菜单或在售情况。':persistent?'记录保存在云端持久磁盘，每天自动备份，最多保留 14 份。自动备份与原数据在同一磁盘，请定期导出到自己的设备。不同浏览器的记录分别保留；更换设备或清除 Cookie 前请导出备份。':cloud?'记录暂存在云端测试数据库，休眠、重启或重新部署后可能清空。不同浏览器的记录分别保留；请及时导出备份。':'记录保存在这台电脑的本地数据库。浏览器身份不同，记录分别保留；清除 Cookie 前请导出备份。';
+  $('#edition-label').textContent=demo?'本机独立演示版 · 虚构测试资料':persistent?'云端个人版 · 记录持续保存':cloud?'云端测试版 · 请及时导出备份':'本机开发版 · 记录由你掌握';
+  $('#record-count').textContent=state.records.length;
+  $('#taste-tags').innerHTML=formatTags([...(state.preferences.flavors||[]),...(state.preferences.roasts||[]),preferenceLabels[state.preferences.coffee_preference||'any']]);
   $('#intro-tags').innerHTML=formatTags([...(state.preferences.brews||[]).slice(0,3),`${state.preferences.city} · ${state.preferences.area}`]);
   renderBrewTypes();
   if(!$('#search-city').value) $('#search-city').value=state.preferences.city||'';
@@ -44,6 +49,7 @@ async function refresh() {
   renderHistory();
   if(!state.services.maps) status('#location-status','地图服务尚未配置。现在可以先记录和整理口味，配置后再查附近店铺。');
   if(!state.services.vision) status('#photo-status','照片识别尚未配置，可先看着照片手动填写。');
+  if(demo&&!demoInitialized){demoInitialized=true;$('#search-mode').value='taste';syncSearchMode();searchNearby(true);}
 }
 function syncKind() {
   const menu=$('#kind').value==='menu'; $('#tasting-fields').hidden=menu;
@@ -51,20 +57,20 @@ function syncKind() {
   if(menu) $('#record-form details').open=true;
 }
 $('#kind').addEventListener('change',syncKind);
-function resetForm() { $('#record-form').reset(); syncBrewOptions(); $('#observed_on').value=localDate(); $('#observed_on').max=localDate(); $('#form-title').textContent='记住这一杯。'; recordLocation=null; status('#save-status',''); syncKind(); }
+function resetForm() { draftCategory=null;$('#record-form').reset(); syncBrewOptions(); $('#observed_on').value=localDate(); $('#observed_on').max=localDate(); $('#form-title').textContent='记住这一杯。'; recordLocation=null; status('#save-status',''); syncKind(); }
 $('#reset-record').addEventListener('click',resetForm);
 $('#record-form').addEventListener('submit',async e=>{
   e.preventDefault(); const button=$('#save-record'); button.disabled=true;
   const data=Object.fromEntries(new FormData(e.target)); data.location=recordLocation;
-  data.brew_category=categoryOf(data.brew);
-  try { await api('/api/records',data); await refresh(); resetForm(); toast('已保存。给下一杯多一点依据。'); tab('history'); }
+  data.brew_category=draftCategory||categoryOf(data.brew);
+  try { await api('/api/records',data); recommendationsDirty=true;await refresh(); resetForm(); toast('已保存。给下一杯多一点依据。'); tab('history'); }
   catch(error) { status('#save-status',error.message,true); }
   finally { button.disabled=false; }
 });
 function editRecord(id) {
   const r=state.records.find(x=>x.id===id); if(!r) return;
   resetForm();
-  syncBrewOptions(r.brew);
+  draftCategory=r.brew_category;syncBrewOptions(r.brew);
   for(const [key,value] of Object.entries(r)) {
     const field=$('#record-form').elements.namedItem(key); if(!field) continue;
     if(key==='reaction') field.value=value; else field.value=Array.isArray(value)?value.join('、'):value??'';
@@ -75,11 +81,12 @@ function renderHistory() {
   const query=$('#filter-text').value.trim().toLowerCase(); const brew=$('#filter-brew').value, reaction=$('#filter-reaction').value, roast=$('#filter-roast').value;
   const rows=state.records.filter(r=>(!brew||r.brew===brew)&&(!reaction||(r.kind==='tasting'&&r.reaction===reaction))&&(!roast||r.roast===roast)&&(!query||[r.product,r.bean,r.cafe,r.address,r.note,r.label_flavors.join(' '),r.tasted_flavors.join(' ')].join(' ').toLowerCase().includes(query)));
   const reactions={like:'♡ 喜欢',neutral:'还说不准',dislike:'不太喜欢'};
-  $('#history-results').innerHTML=rows.length?rows.map(r=>`<article class="journal-card"><div class="card-head"><div><small>${esc(r.observed_on)} · ${r.kind==='menu'?'豆单资料':esc(r.brew)}</small><h3>${esc(r.product)}</h3><small>${esc(r.cafe||'未填写店铺')}${r.bean?' · '+esc(r.bean):''}</small></div><span class="pill ${esc(r.reaction)}">${r.kind==='menu'?'待尝试':reactions[r.reaction]}</span></div><div class="tags">${formatTags([r.roast,...r.label_flavors])}</div>${r.tasted_flavors.length?`<p>实际喝到：${esc(r.tasted_flavors.join('、'))}</p>`:''}${r.note?`<p>${esc(r.note)}</p>`:''}${r.source_note?`<p class="hint">来源：${esc(r.source_note)}</p>`:''}<div class="card-actions"><button class="quiet" data-edit="${r.id}">修改记录</button><button class="quiet danger" data-delete="${r.id}">删除</button></div></article>`).join(''):`<div class="empty"><span class="empty-mark">◡</span><h3>${state.records.length?'还没有符合筛选条件的记录':'你的第一杯，值得被记住'}</h3><p>${state.records.length?'换个关键词或筛选条件试试。':'从店名、喝了什么和喜不喜欢开始。'}</p></div>`;
+  $('#history-results').innerHTML=rows.length?rows.map(r=>`<article class="journal-card"><div class="card-head"><div><small>${esc(r.observed_on)} · ${r.kind==='menu'?'豆单资料':esc(r.brew)}</small><h3>${esc(r.product)}</h3><small>${esc(r.cafe||'未填写店铺')}${r.bean?' · '+esc(r.bean):''}</small></div><span class="pill ${esc(r.reaction)}">${r.kind==='menu'?'待尝试':reactions[r.reaction]}</span></div><div class="tags">${formatTags([r.roast,...r.label_flavors])}</div>${r.tasted_flavors.length?`<p>实际喝到：${esc(r.tasted_flavors.join('、'))}</p>`:''}${r.note?`<p>${esc(r.note)}</p>`:''}${r.source_note?`<p class="hint">来源：${esc(r.source_note)}</p>`:''}<div class="card-actions"><button class="secondary" data-new-tasting="${r.id}">${r.kind==='menu'?'喝完记一杯':'再喝记一杯'}</button><button class="quiet" data-edit="${r.id}">修改记录</button><button class="quiet danger" data-delete="${r.id}">删除</button></div></article>`).join(''):`<div class="empty"><span class="empty-mark">◡</span><h3>${state.records.length?'还没有符合筛选条件的记录':'你的第一杯，值得被记住'}</h3><p>${state.records.length?'换个关键词或筛选条件试试。':'从店名、喝了什么和喜不喜欢开始。'}</p></div>`;
+  $$('[data-new-tasting]').forEach(b=>b.onclick=()=>startTasting(state.records.find(r=>r.id===b.dataset.newTasting)));
   $$('[data-edit]').forEach(b=>b.onclick=()=>editRecord(b.dataset.edit));
   $$('[data-delete]').forEach(b=>b.onclick=async()=>{
     if(!confirm('删除这条记录？此操作无法撤销。')) return;
-    try{await api('/api/delete',{id:b.dataset.delete});await refresh();toast('记录已删除');}catch(e){toast(e.message);}
+    try{await api('/api/delete',{id:b.dataset.delete});recommendationsDirty=true;await refresh();toast('记录已删除');}catch(e){toast(e.message);}
   });
 }
 ['#filter-text','#filter-brew','#filter-reaction','#filter-roast'].forEach(id=>$(id).addEventListener('input',renderHistory));
@@ -98,6 +105,10 @@ function renderBrewTypes() {
   if(!brews.includes(selectedBrew)) selectedBrew=brews[0]||'';
   $('#brew-choice').innerHTML=brews.length?brews.map(b=>`<button type="button" class="${b===selectedBrew?'selected':''}" data-brew="${esc(b)}" aria-pressed="${b===selectedBrew}"><strong>${esc(b)}</strong><small>${esc(brewDescriptions[b]||(categoryOf(b)==='milk'?'我的奶咖选择':'我的常喝类型'))}</small></button>`).join(''):`<p class="hint">${state.preferences.brews?.length?'当前常喝类型没有符合饮品偏好的选项。请在「管理类型」中添加对应类型，或在「我的口味」中调整偏好。':'还没有常喝的类型，点击「管理类型」添加。'}</p>`;
   $$('[data-brew]').forEach(b=>b.onclick=()=>{selectedBrew=b.dataset.brew;renderBrewTypes();if(center||searchMode()==='taste')searchNearby();});
+  const unconfirmed=(state.preferences.brews||[]).filter(b=>categoryOf(b)==='unknown');
+  const filteredUnknown=state.preferences.coffee_preference!=='any'&&unconfirmed.length>0;
+  $('#brew-filter-hint').hidden=!filteredUnknown;
+  $('#brew-filter-hint').textContent=filteredUnknown?`${unconfirmed.join('、')}的分类暂不确定，尚未纳入「${preferenceLabels[state.preferences.coffee_preference]}」推荐。可在管理类型中核对分类。`:'';
   $('#locate').disabled=!brews.length;$('#landmark-form button').disabled=!brews.length;
   $('#taste-search').disabled=!brews.length;
   syncBrewOptions();
@@ -116,7 +127,7 @@ function addDraftBrew(name) {
   if(draftBrews.includes(name)){status('#brews-status','这个类型已经在常喝列表里了。');return;}
   if(draftBrews.length>=20){status('#brews-status','最多保存 20 个类型，可以先移除不常喝的。',true);return;}
   const category=state.brew_catalog?.[name]||$('#custom-category').value;
-  if(!category){status('#brews-status','请为自定义类型选择「黑咖」或「奶咖」。',true);return;}
+  if(!category){status('#brews-status','请为自定义类型选择黑咖、奶咖或暂不确定。',true);return;}
   draftCategories[name]=category;draftBrews.push(name);$('#custom-brew').value='';status('#brews-status','');renderBrewDraft();
 }
 $$('[data-manage-brews]').forEach(b=>b.onclick=()=>{draftBrews=[...(state.preferences.brews||[])];draftCategories={...(state.preferences.brew_categories||{})};$('#custom-brew').value='';$('#custom-category').value=state.preferences.coffee_preference==='milk'?'milk':state.preferences.coffee_preference==='black'?'black':'';status('#brews-status','');renderBrewDraft();$('#brews-dialog').showModal();});
@@ -136,9 +147,11 @@ $('#brews-form').addEventListener('submit',async e=>{
   }catch(error){status('#brews-status',error.message,true);}finally{button.disabled=false;}
 });
 function syncSearchMode() {
-  const mode=searchMode(), destination=mode==='destination';
-  $('#mode-description').textContent=searchDescriptions[mode];
-  $('#locate').hidden=destination;$('#location-hint').hidden=destination;
+  const mode=searchMode(), destination=mode==='destination', demo=state.demo?.enabled;
+  $('#search-mode').disabled=Boolean(demo);
+  $('#mode-description').textContent=demo?'演示模式只使用虚构资料，不请求定位、不查询真实地图。可测试饮品切换、推荐与饮后反馈。':searchDescriptions[mode];
+  $('#locate').hidden=destination||demo;$('#location-hint').hidden=destination||demo;
+  $('#landmark-form').hidden=Boolean(demo);$('.search-panel .divider').hidden=Boolean(demo);
   $('#taste-search').hidden=mode!=='taste';
   $('#landmark-label').textContent=destination?'想去的商圈、地铁站或地标':'商圈、地铁站或地标';
   $('#landmark-form button').textContent=destination?'去这里找':'查找';
@@ -168,7 +181,7 @@ async function searchNearby(historyOnly=false) {
       $$('[data-place]').forEach(b=>b.onclick=()=>{const p=result.places[Number(b.dataset.place)]; center={location:p.location,center_label:p.name,source:searchMode()==='destination'?'destination':'manual'}; $('#landmark').value=p.name; searchNearby();});
       return;
     }
-    cafes=result.cafes;resultMeta=result;status('#location-status',`${searchLabels[result.mode]} · 找到 ${cafes.length} 家候选店铺`);renderCafes();
+    cafes=result.cafes;resultMeta=result;recommendationsDirty=false;status('#location-status',`${searchLabels[result.mode]} · 找到 ${cafes.length} 家候选店铺`);renderCafes();
   } catch(e) {if(version===searchVersion){cafes=[];$('#nearby-results').innerHTML='<div class="empty"><h3>这次查询未完成</h3><p>可以稍后重试，或先记下喝过的一杯。</p></div>';status('#location-status',e.message,true);}}
 }
 $('#locate').addEventListener('click',async()=>{
@@ -201,20 +214,28 @@ $('#search-city').addEventListener('input',()=>{++searchVersion;center=null;$('#
 function distanceLabel(cafe) {const value=cafe.distance;return Number.isFinite(value)?(value>=1000?(value/1000).toFixed(1)+' km':value+' m'):'距离待确认';}
 function renderCafes() {
   const count=cafes.filter(c=>c.products.length).length;
-  $('#nearby-results').innerHTML=cafes.length?`<p class="results-head">${esc(resultMeta.scope_label||'候选店铺')} · ${cafes.length} 家店 · ${count} 家有产品资料<br>${esc(resultMeta.notice||'')}</p>`+cafes.map((c,i)=>`<article class="cafe-card"><div class="card-head"><div><small>${esc(c.source)}</small><h3>${esc(c.name)}</h3><small>${esc(c.address)}</small></div><span class="distance">${esc(distanceLabel(c))}</span></div>${c.products.length?`<div class="products">${c.products.map(p=>`<div class="product"><strong>${esc(p.product)}</strong><div class="tags">${formatTags([p.brew,p.roast,...p.flavors])}</div><p>${p.reasons.map(esc).join('；')}</p><p class="hint">${esc(p.observed_on)} · ${esc(p.source)}<br>${esc(p.availability)}</p><button class="quiet" data-try-record="${p.record_id}" data-cafe-index="${i}">喝完记一杯 ↗</button></div>`).join('')}</div>`:'<p class="no-menu">店铺候选 · 暂无可推荐的产品资料，尚不能判断是否符合你的口味。</p>'}<div class="card-actions"><button class="secondary" data-cafe="${i}" data-kind="tasting">在这家记一杯</button><button class="quiet" data-cafe="${i}" data-kind="menu">补充豆单</button></div></article>`).join(''):`<div class="empty"><h3>${resultMeta.mode==='taste'?'还没有可参考的店铺资料':'暂时没有找到合适的店铺'}</h3><p>${resultMeta.mode==='taste'?'先保存一条带店铺名称、地址或地图关联的饮用记录，也可以选择地点扩展查询。':'换一个地点或找店方式试试。'}</p><p class="hint">${esc(resultMeta.notice||'')}</p></div>`;
+  $('#nearby-results').innerHTML=cafes.length?`<p class="results-head">${esc(resultMeta.scope_label||'候选店铺')} · ${cafes.length} 家店 · ${count} 家有产品资料<br>${esc(resultMeta.notice||'')}</p>`+cafes.map((c,i)=>`<article class="cafe-card"><div class="card-head"><div><small>${esc(c.source)}</small><h3>${esc(c.name)}</h3><small>${esc(c.address)}</small></div><span class="distance">${esc(distanceLabel(c))}</span></div>${c.products.length?`<div class="products">${c.products.map(p=>`<div class="product"><strong>${esc(p.product)}</strong>${p.bean||p.batch?`<p class="hint">${esc(p.bean)}${p.batch?' · '+esc(p.batch):''}</p>`:''}<div class="tags">${formatTags([p.brew,p.roast,...p.flavors])}</div><p>${p.reasons.map(esc).join('；')}</p><p class="hint">${esc(p.observed_on)} · ${esc(p.source)}<br>${esc(p.availability)}</p><button class="quiet" data-try-record="${p.record_id}" data-cafe-index="${i}">喝完记一杯 ↗</button></div>`).join('')}</div>`:'<p class="no-menu">店铺候选 · 暂无可推荐的产品资料，尚不能判断是否符合你的口味。</p>'}<div class="card-actions"><button class="secondary" data-cafe="${i}" data-kind="tasting">在这家记一杯</button><button class="quiet" data-cafe="${i}" data-kind="menu">补充豆单</button></div></article>`).join(''):`<div class="empty"><h3>${resultMeta.mode==='taste'?'还没有可参考的店铺资料':'暂时没有找到合适的店铺'}</h3><p>${resultMeta.mode==='taste'?'先保存一条带店铺名称、地址或地图关联的饮用记录，也可以选择地点扩展查询。':'换一个地点或找店方式试试。'}</p><p class="hint">${esc(resultMeta.notice||'')}</p></div>`;
   $$('[data-cafe]').forEach(b=>b.onclick=()=>prefillCafe(cafes[Number(b.dataset.cafe)],b.dataset.kind));
   $$('[data-try-record]').forEach(b=>b.onclick=()=>{
     const record=state.records.find(r=>r.id===b.dataset.tryRecord); if(!record)return;
-    prefillCafe(cafes[Number(b.dataset.cafeIndex)],'tasting');
-    ['product','bean','roaster','origin','processing','batch','roast'].forEach(k=>$('#record-form').elements.namedItem(k).value=record[k]);
-    $('#label_flavors').value=record.label_flavors.join('、');
+    startTasting(record,cafes[Number(b.dataset.cafeIndex)]);
   });
 }
-function prefillCafe(cafe,kind) { resetForm();$('#kind').value=kind;$('#cafe').value=cafe.name;$('#address').value=cafe.address;$('#brew').value=selectedBrew;$('#record-form').elements.provider_id.value=cafe.id;recordLocation=cafe.location;syncKind();tab('record'); }
+function startTasting(record,cafe=null) {
+  if(!record)return;
+  resetForm();syncBrewOptions(record.brew);
+  const draft=tastingDraft(record,localDate());
+  for(const [key,value] of Object.entries(draft)){const field=$('#record-form').elements.namedItem(key);if(field)field.value=Array.isArray(value)?value.join('、'):value??'';}
+  draftCategory=record.brew_category;recordLocation=draft.location;
+  if(cafe){$('#cafe').value=cafe.name;$('#address').value=cafe.address;recordLocation=cafe.location||draft.location;$('#record-form').elements.provider_id.value=cafe.id.startsWith('history-')?(record.provider_id||''):cafe.id;}
+  $('#form-title').textContent='这一杯，喝得怎么样？';syncKind();tab('record');$('#product').focus();
+}
+$('#brew').addEventListener('change',()=>{draftCategory=null;});
+function prefillCafe(cafe,kind) { resetForm();$('#kind').value=kind;$('#cafe').value=cafe.name;$('#address').value=cafe.address;$('#brew').value=selectedBrew;$('#record-form').elements.provider_id.value=cafe.id.startsWith('history-')?'':cafe.id;recordLocation=cafe.location;syncKind();tab('record'); }
 // A manually changed branch cannot keep coordinates from the previous branch.
 ['#cafe','#address'].forEach(id=>$(id).addEventListener('input',()=>{recordLocation=null;$('#record-form').elements.provider_id.value='';}));
 $('#photo').addEventListener('change',async e=>{
-  const file=e.target.files[0];photoData=null;$('#extract').disabled=true;$('#photo-preview').hidden=true;$('#photo-items').replaceChildren();
+  const file=e.target.files[0];photoData=null;photoItems=[];$('#photo-batch').hidden=true;$('#extract').disabled=true;$('#photo-preview').hidden=true;$('#photo-items').replaceChildren();
   if(!file)return;
   if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>15*1024*1024){status('#photo-status','请选择小于 15 MB 的 JPG、PNG 或 WebP 图片。',true);return;}
   const url=URL.createObjectURL(file), image=new Image();
@@ -229,7 +250,7 @@ $('#photo').addEventListener('change',async e=>{
 $('#extract').addEventListener('click',async()=>{
   if(!photoData)return;$('#extract').disabled=true;status('#photo-status','正在识别，请稍候……');
   try{
-    const result=await api('/api/extract',{image:photoData});status('#photo-status',result.uncertain);
+    const result=await api('/api/extract',{image:photoData});photoItems=result.items;$('#photo-batch').hidden=!photoItems.length;status('#photo-status',result.uncertain);
     $('#photo-items').innerHTML=result.items.length?result.items.map((p,i)=>`<button type="button" class="photo-item" data-photo-item="${i}">${esc(p.product||p.bean||'未命名项目')} · 填入表单 ↗</button>`).join(''):'<p class="hint">没有识别出清晰的产品文字，可尝试更清楚的照片。</p>';
     $$('[data-photo-item]').forEach(b=>b.onclick=()=>{
       const item=result.items[Number(b.dataset.photoItem)];
@@ -238,10 +259,12 @@ $('#extract').addEventListener('click',async()=>{
     });
   }catch(e){status('#photo-status',e.message,true);}finally{$('#extract').disabled=false;}
 });
-$('#prefs-open').onclick=()=>{const f=$('#prefs-form');f.elements.flavors.value=state.preferences.flavors.join('、');f.elements.city.value=state.preferences.city;f.elements.area.value=state.preferences.area;f.elements.coffee_preference.value=state.preferences.coffee_preference||'any';$('#prefs-dialog').showModal();};
+$('#prefs-open').onclick=()=>{const f=$('#prefs-form');f.elements.flavors.value=state.preferences.flavors.join('、');f.elements.city.value=state.preferences.city;f.elements.area.value=state.preferences.area;f.elements.coffee_preference.value=state.preferences.coffee_preference||'any';f.querySelectorAll('[name=roasts]').forEach(input=>input.checked=(state.preferences.roasts||[]).includes(input.value));$('#prefs-dialog').showModal();};
 $('#prefs-close').onclick=()=>$('#prefs-dialog').close();
-$('#prefs-form').addEventListener('submit',async e=>{e.preventDefault();const f=e.target;try{await api('/api/preferences',{...state.preferences,flavors:f.elements.flavors.value,city:f.elements.city.value,area:f.elements.area.value,coffee_preference:f.elements.coffee_preference.value});++searchVersion;await refresh();$('#prefs-dialog').close();toast('口味偏好已更新');cafes=[];$('#nearby-results').innerHTML='<div class="empty"><h3>按新的偏好，找下一杯</h3><p>选择喜欢的类型和地点后重新查询。</p></div>';if((center||searchMode()==='taste')&&selectedBrew)searchNearby();}catch(error){status('#prefs-status',error.message,true);}});
+$('#prefs-form').addEventListener('submit',async e=>{e.preventDefault();const f=e.target;try{await api('/api/preferences',{...state.preferences,flavors:f.elements.flavors.value,city:f.elements.city.value,area:f.elements.area.value,coffee_preference:f.elements.coffee_preference.value,roasts:[...f.querySelectorAll('[name=roasts]:checked')].map(input=>input.value)});++searchVersion;await refresh();$('#prefs-dialog').close();toast('口味偏好已更新');cafes=[];$('#nearby-results').innerHTML='<div class="empty"><h3>按新的偏好，找下一杯</h3><p>选择喜欢的类型和地点后重新查询。</p></div>';if((center||searchMode()==='taste')&&selectedBrew)searchNearby();}catch(error){status('#prefs-status',error.message,true);}});
 $('#export').onclick=async()=>{try{const data=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='coffee-buddy-'+localDate()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){toast(e.message);}};
-$('#import-file').addEventListener('change',async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>6*1024*1024)throw new Error('备份文件过大');const data=JSON.parse(await file.text());if(!confirm('将备份记录合并到当前记录中？相同编号的记录会更新，其他记录保留。'))return;const result=await api('/api/import',data);await refresh();toast(`已导入 ${result.count} 条记录`);}catch(error){toast(error.message);}finally{e.target.value='';}});
+$('#import-file').addEventListener('change',async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>6*1024*1024)throw new Error('备份文件过大');const data=JSON.parse(await file.text());const restorePreferences=data.preferences!==undefined;if(!confirm('将备份记录合并到当前记录中？相同编号的记录会更新，其他记录保留。'+(restorePreferences?'备份中的口味偏好和咖啡类型也将替换当前设置。':'')))return;const result=await api('/api/import',data);recommendationsDirty=true;await refresh();toast(`已导入 ${result.count} 条记录${restorePreferences?'，并恢复偏好设置':''}`);}catch(error){toast(error.message);}finally{e.target.value='';}});
+const menuBatch=initMenuBatch({getState:()=>state,getContext:()=>({cafe:$('#cafe').value,address:$('#address').value,source_note:$('#source_note').value,provider_id:$('#record-form').elements.provider_id.value,location:recordLocation}),api,today:localDate,toast,onSaved:async()=>{recommendationsDirty=true;$('#filter-text').value='';$('#filter-brew').value='';$('#filter-reaction').value='';$('#filter-roast').value='';await refresh();tab('history');}});
+$('#photo-batch').onclick=()=>menuBatch.addPhotoItems(photoItems);
 resetForm();
 refresh().catch(e=>{status('#location-status','无法连接本地服务：'+e.message,true);toast('加载失败，请确认本地服务正在运行后刷新页面。');});

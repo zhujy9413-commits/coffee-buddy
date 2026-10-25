@@ -9,3 +9,10 @@
 #brew-suggestions{display:block}
 
 .deployment-notice{margin:20px 0 0;padding:13px 17px;border:1px solid #d8cba4;border-radius:9px;background:#f5edda;color:#6e5830;font-size:12px;line-height:1.8}
+
+.roast-options{border:0;padding:0;margin:20px 0}.roast-options legend{margin:0}.roast-options label{display:inline-flex;align-items:center;gap:6px;margin:8px 10px 0 0;font-size:13px}.roast-options input{accent-color:var(--green);width:17px;height:17px}.roast-options .hint{margin:8px 0 0}
+
+.record-tools{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}#menu-batch-dialog{max-width:760px;max-height:calc(100dvh - 32px);overflow:auto}#batch-preview{display:grid;gap:14px;margin-top:20px}.menu-draft{border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}.menu-draft legend{padding:0 6px;color:var(--green)}.menu-draft .draft-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.menu-draft label{margin-top:10px}.menu-draft details{margin-top:12px}.menu-draft .field-row{gap:12px}#menu-batch-dialog .dialog-actions{position:sticky;bottom:-30px;background:var(--card);padding:12px 0;margin-bottom:0}@media(max-width:420px){.record-tools{gap:2px}.record-tools .secondary{font-size:11px;padding:7px 9px}.menu-draft{padding:12px}#menu-batch-dialog{padding:22px}.menu-draft .field-row{grid-template-columns:1fr}#menu-batch-dialog .dialog-actions{bottom:-22px}}
+
+.menu-reviewed{display:flex;align-items:center;gap:8px;font-size:13px}.menu-reviewed input{width:18px;height:18px;accent-color:var(--green);flex-shrink:0}
+@media(max-width:760px){#menu-batch-dialog button,.menu-draft summary,.menu-reviewed{min-height:44px}.menu-draft summary{padding:12px 0}.menu-reviewed{cursor:pointer}}

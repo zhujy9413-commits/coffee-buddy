@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from cloud_preview import NOTICE, cloud_settings, make_cloud_handler
 from web_core import Store
+from cloud_storage import DailyBackups
 
 
 class CloudSettingsTests(unittest.TestCase):
@@ -122,6 +123,29 @@ class CloudPreviewTests(unittest.TestCase):
                 self.assertEqual(self.request('/api/preferences', auth=self.auth, method='POST',
                     origin=origin, data={'city': '测试城市'})[0], 403)
         for route in ['/.env', '/data/web/coffee.sqlite3', '/cloud_preview.py']:
+            self.assertEqual(self.request(route, auth=self.auth)[0], 404)
+
+    def test_persistent_state_reports_verified_storage_and_private_backups_are_not_downloadable(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+        backups = DailyBackups(self.store.path, Path(self.folder.name) / 'backups')
+        backups.snapshot()
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), make_cloud_handler(self.store, self.host, self.password, backups))
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        status, headers, body = self.request('/api/state', auth=self.auth)
+        deployment = json.loads(body)['deployment']
+        self.assertEqual(status, 200)
+        self.assertEqual(deployment['mode'], 'cloud-personal')
+        self.assertFalse(deployment['ephemeral'])
+        self.assertEqual(deployment['backup']['status'], 'ok')
+        self.assertFalse(deployment['backup']['offsite'])
+        self.assertNotIn(self.folder.name.encode(), body)
+        self.assertIn('Secure', headers['Set-Cookie'])
+        backups.failed = True
+        self.assertEqual(json.loads(self.request('/api/state', auth=self.auth)[2])['deployment']['backup']['status'], 'error')
+        for route in ['/cloud_storage.py', '/storage_backup.py', '/var/data/coffee-buddy/coffee.sqlite3', '/backups/coffee.sqlite3']:
             self.assertEqual(self.request(route, auth=self.auth)[0], 404)
 
 

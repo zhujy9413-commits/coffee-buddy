@@ -1,17 +1,18 @@
-"""Password-protected, disposable HTTPS cloud test app. No local .env is loaded."""
+"""Password-protected cloud app with opt-in verified disk storage. No .env is loaded."""
 import base64
 import hmac
 import os
 import re
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from web_app import make_handler
-from web_core import AppError, Store
+from web_core import AppError
+from cloud_storage import open_cloud_store
 
 
 NOTICE = '云端测试版：使用独立测试数据；休眠、重启或重新部署后记录可能清空。重要记录请及时导出备份。'
+PERSISTENT_NOTICE = '云端个人版：记录保存在持久磁盘，重启和重新部署后保留。每天自动生成数据库备份；仍请定期导出到自己的设备。'
 
 
 def cloud_settings(env):
@@ -34,7 +35,7 @@ def cloud_settings(env):
     return hostname, password, port
 
 
-def make_cloud_handler(store, hostname, password):
+def make_cloud_handler(store, hostname, password, backups=None):
     # Revalidate the security settings even when this factory is used directly.
     cloud_settings({'RENDER_EXTERNAL_HOSTNAME': hostname, 'PREVIEW_PASSWORD': password, 'AMAP_API_KEY': 'configured'})
     parent = make_handler(store, allowed_hosts={hostname})
@@ -64,7 +65,11 @@ def make_cloud_handler(store, hostname, password):
         def reply(self, data, status=200, content_type='application/json; charset=utf-8'):
             self.need_auth = status == 401
             if status == 200 and urlsplit(self.path).path == '/api/state' and isinstance(data, dict):
-                data = dict(data, deployment={'mode': 'cloud-preview', 'ephemeral': True, 'notice': NOTICE})
+                deployment = {'mode': 'cloud-preview', 'ephemeral': True, 'notice': NOTICE}
+                if backups is not None:
+                    deployment = {'mode': 'cloud-personal', 'ephemeral': False, 'notice': PERSISTENT_NOTICE,
+                                  'backup': backups.status()}
+                data = dict(data, deployment=deployment)
             super().reply(data, status, content_type)
 
         def send_header(self, keyword, value):
@@ -85,15 +90,19 @@ def main():
     # Never load .env or open data/web. Runtime secrets are provided by the host.
     hostname, password, port = cloud_settings(os.environ)
     os.umask(0o077)
-    store = Store(Path('/tmp/coffee-buddy-cloud-preview/coffee.sqlite3'))
-    server = ThreadingHTTPServer(('0.0.0.0', port), make_cloud_handler(store, hostname, password))
-    print('Coffee Buddy 独立云端测试版已启动；访问须使用测试凭据。', flush=True)
+    store, backups = open_cloud_store(os.environ)
+    server = ThreadingHTTPServer(('0.0.0.0', port), make_cloud_handler(store, hostname, password, backups))
+    print('Coffee Buddy 云端服务已启动；访问须使用访问凭据。', flush=True)
     try:
+        if backups:
+            backups.start()
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        if backups:
+            backups.close()
 
 
 if __name__ == '__main__':

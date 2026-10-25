@@ -18,7 +18,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 DEFAULT_PREFS = {"city": "北京", "area": "朝阳区", "flavors": ["威士忌酒香", "偏酸"],
-                 "brews": ["冰美式", "手冲"], "coffee_preference": "any", "exclude_milk": False}
+                 "brews": ["冰美式", "手冲"], "roasts": [], "coffee_preference": "any", "exclude_milk": False}
 BREW_CATEGORIES = dict.fromkeys(["冰美式", "热美式", "手冲", "冷萃", "意式浓缩", "氮气冷萃", "其他黑咖啡"], "black")
 BREW_CATEGORIES.update(dict.fromkeys(["拿铁", "卡布奇诺", "澳白", "摩卡", "Dirty", "奶咖"], "milk"))
 BREWS = set(BREW_CATEGORIES)
@@ -78,7 +78,7 @@ def brew_category(name, prefs=None, record=None):
 
 
 def normalize_preferences(prefs):
-    result = dict(prefs, coffee_preference=coffee_preference(prefs))
+    result = dict(prefs, coffee_preference=coffee_preference(prefs), roasts=prefs.get('roasts', []))
     result["exclude_milk"] = result["coffee_preference"] == "black"
     result["brew_categories"] = {b: brew_category(b, prefs) for b in result.get("brews", [])}
     return result
@@ -167,12 +167,17 @@ class Store:
         records.sort(key=lambda r: (r["observed_on"], r.get("updated_at", "")), reverse=True)
         return {"preferences": normalize_preferences(prefs), "records": records}
 
-    def preferences(self, owner, data):
+    @staticmethod
+    def validated_preferences(data):
         if not isinstance(data, dict):
             raise AppError("偏好格式不正确")
         prefs = {"city": text(data.get("city", "北京"), 30), "area": text(data.get("area", "朝阳区"), 60),
                  "flavors": tags(data.get("flavors", [])), "brews": brew_list(data.get("brews", DEFAULT_PREFS["brews"])),
                  "coffee_preference": coffee_preference(data)}
+        roasts = data.get('roasts', [])
+        if not isinstance(roasts, list) or len(roasts) > 5 or any(not isinstance(r, str) or r not in ROASTS - {'未知'} for r in roasts):
+            raise AppError('请选择有效的烘焙深度')
+        prefs['roasts'] = list(dict.fromkeys(roasts))
         if prefs["coffee_preference"] not in ("any", "black", "milk") or ("exclude_milk" in data and type(data["exclude_milk"]) is not bool):
             raise AppError("偏好选项无效")
         categories = data.get("brew_categories", {})
@@ -180,6 +185,10 @@ class Store:
             raise AppError("咖啡类型分类无效")
         prefs["brew_categories"] = {b: brew_category(b, {"brew_categories": categories}) for b in prefs["brews"]}
         prefs = normalize_preferences(prefs)
+        return prefs
+
+    def preferences(self, owner, data):
+        prefs = self.validated_preferences(data)
         with closing(self.connect()) as con, con:
             con.execute("UPDATE users SET prefs=? WHERE token=?", (json.dumps(prefs, ensure_ascii=False), owner))
         return prefs
@@ -208,13 +217,49 @@ class Store:
             if con.execute("DELETE FROM entries WHERE owner=? AND id=?", (owner, record_id)).rowcount == 0:
                 raise AppError("未找到这条记录", 404)
 
+    def save_menu_batch(self, owner, data):
+        rows = data.get('items') if isinstance(data, dict) else None
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 20:
+            raise AppError('每次请核对并保存 1–20 款豆单资料')
+        items, ids = [], set()
+        for index, row in enumerate(rows, 1):
+            try:
+                if not isinstance(row, dict) or not row.get('id') or row.get('kind', 'menu') != 'menu':
+                    raise AppError('需要有效的豆单草稿编号，且只能批量保存豆单资料')
+                item = validate_entry(dict(row, kind='menu', reaction='neutral', tasted_flavors=[]))
+                if item['id'] in ids:
+                    raise AppError('草稿编号重复，请重新生成草稿')
+                ids.add(item['id'])
+                items.append(item)
+            except AppError as error:
+                raise AppError('第 %s 款：%s' % (index, error)) from None
+        created = 0
+        with closing(self.connect()) as con, con:
+            con.execute('BEGIN IMMEDIATE')
+            pending = []
+            for item in items:
+                existing = con.execute('SELECT data FROM entries WHERE owner=? AND id=?', (owner, item['id'])).fetchone()
+                if existing:
+                    old = json.loads(existing[0])
+                    if any(old.get(key) != value for key, value in item.items()):
+                        raise AppError('这份草稿已保存且内容发生变化，请到“我的记录”修改，或重新生成草稿', 409)
+                else:
+                    pending.append(item)
+            for item in pending:
+                self._save(con, owner, item)
+                created += 1
+        return {'count': len(items), 'created': created, 'unchanged': len(items) - created}
+
     def import_records(self, owner, data):
         if not isinstance(data, dict) or data.get("format") != "coffee-buddy-web-v1" or not isinstance(data.get("records"), list):
             raise AppError("请选择本应用导出的备份文件")
         if len(data["records"]) > 1000:
             raise AppError("一次最多导入 1000 条记录")
         items = [validate_entry(r) for r in data["records"]]
+        prefs = self.validated_preferences(data['preferences']) if 'preferences' in data else None
         with closing(self.connect()) as con, con:
+            if prefs is not None:
+                con.execute('UPDATE users SET prefs=? WHERE token=?', (json.dumps(prefs, ensure_ascii=False), owner))
             for item in items:
                 self._save(con, owner, item)
         return len(items)
@@ -373,37 +418,68 @@ def same_cafe(record, cafe):
     return bool(record.get("address")) and record["cafe"] == cafe["name"] and record["address"] == cafe["address"]
 
 
+def product_identity(record):
+    # Keep known different beans/batches apart within one branch and brew.
+    # Incomplete identities remain provisional and get an explicit caveat.
+    return tuple(record.get(key, '') for key in ('product', 'bean', 'roaster', 'origin', 'processing', 'batch', 'roast'))
+
+
+def matches_flavor(flavor, values):
+    needles = ('威士忌', '酒香', 'whisky', 'whiskey') if any(w in flavor.lower() for w in ('酒', 'whisk')) else (('偏酸', '酸质', '酸甜', '果酸') if '酸' in flavor else (flavor,))
+    for value in values:
+        for needle in needles:
+            for match in re.finditer(re.escape(needle.lower()), value.lower()):
+                before, after = value[:match.start()], value[match.end():]
+                if re.search(r'(没(?:有)?|无|不|缺乏|不喜欢|不爱)(?:什么|明显的|明显|太|怎么)?$', before):
+                    continue
+                if re.match(r'(不明显|很弱|偏弱|不足|不够|太弱|缺失)', after):
+                    continue
+                return True
+    return False
+
+
 def recommend(cafes, entries, prefs, brew, mode="taste"):
     """Rank documented products; never infer products from a POI's name."""
     results = []
     for cafe in cafes:
         products = []
         matched = [r for r in entries if same_cafe(r, cafe) and r["brew"] == brew]
+        seen = set()
         for r in sorted(matched, key=lambda x: (x["observed_on"], x.get("updated_at", "")), reverse=True):
             preference = coffee_preference(prefs)
             if preference != "any" and brew_category(r["brew"], prefs, r) != preference:
                 continue
-            if any(p["product"] == r["product"] for p in products):
+            identity = product_identity(r)
+            if identity in seen:
                 continue
-            history = sorted((h for h in matched if h["product"] == r["product"] and h["kind"] == "tasting"),
+            seen.add(identity)
+            history = sorted((h for h in matched if product_identity(h) == identity and h["kind"] == "tasting"),
                              key=lambda h: (h["observed_on"], h.get("updated_at", "")), reverse=True)
             latest = history[0] if history else None
             if latest and latest["reaction"] == "dislike":
                 continue
-            evidence = "、".join(r["label_flavors"])
             reasons, score = [], 0
             for flavor in prefs.get("flavors", []):
-                needles = ("威士忌", "酒香", "whisky", "whiskey") if any(w in flavor.lower() for w in ("酒", "whisk")) else (("偏酸", "酸质", "酸甜", "果酸") if "酸" in flavor else (flavor,))
-                if any(n.lower() in evidence.lower() for n in needles):
+                if latest and matches_flavor(flavor, latest.get('tasted_flavors', [])):
+                    reasons.append('你在这家店最近一次喝到“' + flavor + '”（' + latest['observed_on'] + '）')
+                    score += 3
+                elif matches_flavor(flavor, r['label_flavors']):
                     reasons.append("标注风味符合你喜欢的“" + flavor + "”")
                     score += 2
             if latest and latest["reaction"] == "like":
                 reasons.append("你喜欢过这家店的这款" + brew)
                 score += 4
+            if r['roast'] in prefs.get('roasts', []):
+                reasons.append('记录的' + r['roast'] + '符合你的烘焙偏好')
+                score += 1
             if score == 0:
                 reasons.append("有这家店的产品资料，口味是否适合还需要尝试")
+            if not r.get('bean') or not r.get('batch'):
+                reasons.append('豆子或批次未记全，同名饮品可能更换配方，请向店铺核对')
             age = (date.today() - date.fromisoformat(r["observed_on"])).days
             products.append({"record_id": r["id"], "product": r["product"], "bean": r["bean"], "brew": brew,
+                             'batch': r.get('batch', ''), 'tasted_flavors': latest.get('tasted_flavors', []) if latest else [],
+                             'feedback_on': latest['observed_on'] if latest else None,
                              "flavors": r["label_flavors"], "roast": r["roast"], "reasons": reasons, "score": score,
                              "source": r["source_note"] or "你的饮用记录", "observed_on": r["observed_on"],
                              "availability": "历史饮用记录，当前在售情况待确认" if r["kind"] == "tasting" else "豆单资料距今 %s 天，当前在售情况待确认" % age})

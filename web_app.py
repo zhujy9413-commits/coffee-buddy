@@ -28,7 +28,7 @@ def load_env():
                 os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 
 
-def make_handler(store, allowed_hosts=None):
+def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
     limits = defaultdict(list)
     accepted_hosts = frozenset({"localhost", "127.0.0.1", "::1"} if allowed_hosts is None else allowed_hosts)
 
@@ -50,7 +50,7 @@ def make_handler(store, allowed_hosts=None):
             sdk_execution = " 'unsafe-eval'" if allow_sdk_eval() else ""
             self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'" + sdk_sources + sdk_execution + "; connect-src 'self'" + sdk_sources + "; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             if getattr(self, "new_session", False):
-                self.send_header("Set-Cookie", "coffee_session=" + self.owner + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+                self.send_header("Set-Cookie", session_cookie + "=" + self.owner + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
             self.end_headers()
             self.wfile.write(body)
 
@@ -69,7 +69,7 @@ def make_handler(store, allowed_hosts=None):
                 cookie.load(self.headers.get("Cookie", ""))
             except Exception:
                 cookie = SimpleCookie()
-            token = cookie.get("coffee_session")
+            token = cookie.get(session_cookie)
             self.owner, self.new_session = store.session(token.value if token else None)
 
         def body(self):
@@ -109,7 +109,7 @@ def make_handler(store, allowed_hosts=None):
                     self.reply(body, content_type=content_type)
                 elif path == "/api/export":
                     self.reply(dict(format="coffee-buddy-web-v1", **store.state(self.owner)))
-                elif path in {"/", "/app.js", "/style.css", "/location.js", "/amap-location.js"}:
+                elif path in {"/", "/app.js", "/style.css", "/location.js", "/amap-location.js", "/journal.js", "/menu-drafts.js", "/menu-batch.js"}:
                     file = ROOT / "web" / ("index.html" if path == "/" else path[1:])
                     self.reply(file.read_bytes(), content_type=mimetypes.guess_type(file.name)[0] + "; charset=utf-8")
                 else:
@@ -123,6 +123,8 @@ def make_handler(store, allowed_hosts=None):
                 data, path = self.body(), urlparse(self.path).path
                 if path == "/api/records":
                     self.reply({"record": store.save(self.owner, data)})
+                elif path == '/api/menu-batch':
+                    self.reply(store.save_menu_batch(self.owner, data))
                 elif path == "/api/delete":
                     store.delete(self.owner, data.get("id", ""))
                     self.reply({"ok": True})

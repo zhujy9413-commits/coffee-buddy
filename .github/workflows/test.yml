@@ -16,3 +16,8 @@ jobs:
         run: pip install -r requirements.txt pytest
       - name: 运行测试
         run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 检查定位与新建体验草稿
+        run: node --test test_location.mjs test_amap_location.mjs test_journal.mjs test_menu_drafts.mjs
