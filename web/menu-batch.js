@@ -65,12 +65,12 @@ export function initMenuBatch({getState,getContext,api,onSaved,toast,today}) {
       toast(result.created?`已新增 ${result.created} 款豆单资料`:'这批豆单已保存，没有重复添加');
     }catch(error){message(error.message,true);}finally{button.disabled=!drafts.length;}
   });
-  return {addPhotoItems(items){
+  return {hasDrafts:()=>drafts.length>0,open(){initialize();render();message('');dialog.showModal();},addPhotoItems(items){
     try{
       initialize();if(drafts.length+items.length>20)throw new Error('草稿合计超过 20 款，请先保存或移除部分产品');
       const additions=draftsFromItems(items);additions.forEach(row=>{row.brew=row.brew||$('#batch-brew').value;});
       drafts.push(...additions);if(!$('#batch-source').value)$('#batch-source').value='用户核对后的豆单照片';
-      render();message('识别结果已加入草稿，请核对产品、饮品类型和共同资料后保存。');dialog.showModal();
-    }catch(error){toast(error.message);}
+      render();message('识别结果已加入草稿，请核对产品、饮品类型和共同资料后保存。');dialog.showModal();return true;
+    }catch(error){toast(error.message);return false;}
   }};
 }

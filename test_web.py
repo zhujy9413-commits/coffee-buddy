@@ -248,7 +248,7 @@ class DomainTests(unittest.TestCase):
         image = 'data:image/jpeg;base64,' + base64.b64encode(b'\xff\xd8\xfftest').decode()
         response = {"choices": [{"message": {"content": json.dumps({"items": [{"product": "可见豆名", "roast": "不确定烘焙", "label_flavors": ["威士忌酒香"], "reaction": "like"}]})}}]}
         env = {"VISION_ENDPOINT": "https://vision.example/chat/completions", "VISION_API_KEY": "test-only", "VISION_MODEL": "test-vision"}
-        with patch.dict(os.environ, env), patch('web_core.json_request', return_value=response) as request:
+        with patch.dict(os.environ, env), patch('web_core.photo_model_request', return_value=response) as request:
             result = extract_photo({"image": image})
             self.assertEqual(result["items"][0]["roast"], "未知")
             self.assertNotIn("reaction", result["items"][0])
@@ -259,7 +259,7 @@ class DomainTests(unittest.TestCase):
         import base64
         image = 'data:image/jpeg;base64,' + base64.b64encode(b'\xff\xd8\xfftest').decode()
         env = {"VISION_ENDPOINT": "https://vision.example/chat/completions", "VISION_API_KEY": "test-only", "VISION_MODEL": "test-vision"}
-        with patch.dict(os.environ, env), patch('web_core.json_request', return_value={}), self.assertRaises(AppError) as ctx:
+        with patch.dict(os.environ, env), patch('web_core.photo_model_request', return_value={}), self.assertRaises(AppError) as ctx:
             extract_photo({"image": image})
         self.assertIn("手动填写", str(ctx.exception))
 

@@ -493,13 +493,40 @@ def recommend(cafes, entries, prefs, brew, mode="taste"):
     return sorted(results, key=lambda c: (-c["score"], distance_key(c)))
 
 
+def photo_model_request(endpoint, payload, key):
+    request = urllib.request.Request(endpoint, data=json.dumps(payload).encode(),
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key})
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            return json.loads(response.read(8 * 1024 * 1024))
+    except urllib.error.HTTPError as error:
+        # Never reflect upstream bodies: providers can echo keys, URLs or input.
+        messages = {401: '照片识别服务的密钥无效或已过期，请检查识别配置',
+                    403: '照片识别服务未授权，请检查模型权限及密钥所属地域',
+                    402: '照片识别服务的额度或计费状态不可用，请检查服务账户',
+                    404: '照片识别模型或接口地址不可用，请检查识别配置',
+                    429: '照片识别额度不足或请求过于频繁，请检查服务额度并稍后重试',
+                    400: '识别服务不支持当前模型或图片请求，请检查图片模型配置'}
+        message = messages.get(error.code, '照片识别服务暂时不可用，请稍后重试')
+        error.close()
+        raise AppError(message, 502) from None
+    except (TimeoutError, urllib.error.URLError):
+        raise AppError('照片识别服务连接失败或超时，请稍后重试；也可以先手动填写', 502) from None
+    except (ValueError, UnicodeError):
+        raise AppError('照片识别服务返回格式异常，请稍后重试或手动填写', 502) from None
+
+
 def extract_photo(data):
     endpoint = os.getenv("VISION_ENDPOINT", "").strip()
     key = os.getenv("VISION_API_KEY", "").strip()
     model = os.getenv("VISION_MODEL", "").strip()
     if not all((endpoint, key, model)):
         raise AppError("照片识别尚未配置，你可以先根据照片手动填写。", 503)
-    if not endpoint.startswith("https://"):
+    try:
+        parsed = urllib.parse.urlsplit(endpoint)
+    except ValueError:
+        raise AppError('照片识别服务地址无效，请检查识别配置', 503) from None
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
         raise AppError("照片识别服务需要 HTTPS 地址", 503)
     image = data.get("image", "")
     if not isinstance(image, str) or len(image) > 4 * 1024 * 1024:
@@ -517,22 +544,33 @@ def extract_photo(data):
               '返回JSON对象 {"items":[{"product":"","bean":"","roaster":"","origin":"","processing":"",'
               '"batch":"","roast":"未知","label_flavors":[],"brew":""}],"uncertain":[]}。'
               '缺失文字留空，不推断风味、店名、制作方式或用户喜好。roast只能是未知/浅烘/中浅烘/中烘/中深烘/深烘。最多提取20项。')
-    response = json_request(endpoint, {"model": model, "messages": [{"role": "user", "content": [
+    response = photo_model_request(endpoint, {"model": model, "messages": [{"role": "user", "content": [
         {"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": image}}]}], "max_tokens": 2500},
-        {"Content-Type": "application/json", "Authorization": "Bearer " + key})
+        key)
     try:
-        content = response["choices"][0]["message"]["content"]
+        choice = response['choices'][0]
+        if choice.get('finish_reason') == 'length':
+            raise AppError('识别结果超出单次长度，请把豆单分成几张拍摄后重试', 502)
+        content = choice["message"]["content"]
         content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
         result = json.loads(content)
         if not isinstance(result.get("items"), list):
             raise ValueError()
         cleaned = []
         for item in result["items"][:20]:
+            if not isinstance(item, dict):
+                raise ValueError()
             fields = {k: text(item.get(k, ""), 160) for k in ("product", "bean", "roaster", "origin", "processing", "batch")}
-            fields["roast"] = item.get("roast") if item.get("roast") in ROASTS else "未知"
+            fields["roast"] = item.get("roast") if isinstance(item.get('roast'), str) and item['roast'] in ROASTS else "未知"
             fields["label_flavors"] = tags(item.get("label_flavors", []))
-            fields["brew"] = item.get("brew") if item.get("brew") in BREWS else ""
-            cleaned.append(fields)
-        return {"items": cleaned, "uncertain": "请逐项核对识别结果，尤其是豆名、烘焙度和风味。"}
+            fields["brew"] = item.get("brew") if isinstance(item.get('brew'), str) and item['brew'] in BREWS else ""
+            if fields['product'] or fields['bean']:
+                cleaned.append(fields)
+        notice = '请逐项核对识别结果，尤其是豆名、烘焙度和风味；未识别的信息请手动补充。'
+        if len(result['items']) > 20:
+            notice = '返回结果超过 20 款，本次仅生成前 20 款草稿，请另拍剩余产品。' + notice
+        if not cleaned:
+            notice = '没有识别出清晰的产品文字，请换一张清楚的豆单照片，或先手动填写。'
+        return {"items": cleaned, "uncertain": notice}
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         raise AppError("未能读取清晰的识别结果，请换一张照片或手动填写", 502)
