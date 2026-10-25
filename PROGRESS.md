@@ -111,7 +111,7 @@ QUIC 超时后尝试官方支持的 HTTP/2，后者返回 `TLS handshake with ed
 ## 独立云端测试版准备（尚未部署）
 
 - 用户选择完整项目测试版，保留 VPN/TUN 设置；现有 Sites 的 Workers 环境不能直接承载 Python/SQLite，因此准备 Render Docker 免费实例方案，关闭自动部署，不创建付费资源。
-- 新增 `cloud_preview.py`、`Dockerfile.preview`、`.dockerignore`、`render.yaml`。镜像仅复制运行必需源码；不读取本机 `.env`，也不复制记录或临时凭据。
+- 新增 `cloud_preview.py`、`Dockerfile`、`.dockerignore`、`render.yaml`。镜像仅复制运行必需源码；不读取本机 `.env`，也不复制记录或临时凭据。
 - 全站随机访问密码、Secure/HttpOnly Cookie、固定云端主机和 HTTPS 同源写请求；只有无数据的 `/healthz` 公开。缺少密码、域名或 Web 服务 Key 时拒绝启动。
 - 云端使用设备定位，不配置 JS SDK 密钥或 `unsafe-eval`。云端页面显示临时数据提示，明确免费实例休眠、重启或部署后可能清空记录；照片识别仍未配置。
 - 5 项新增云端检查通过：启动配置、公开健康检查、密码保护与密钥不泄露、独立数据与 Secure Cookie、主机和同源限制。全量 63 项 Python、16 项 JavaScript 检查及语法、diff 空白检查通过。尚未验证容器构建、Render 运行或 iPhone 实际定位；当前等待 Render 安装与账号连接。

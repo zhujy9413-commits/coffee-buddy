@@ -22,7 +22,7 @@
 ## 部署参数
 
 1. 连接 Render 和 GitHub 仓库，核对仅使用 `Free` 实例，不开通付费资源。
-2. 使用仓库根目录 `render.yaml` 创建服务，构建文件为 `Dockerfile.preview`。
+2. 使用仓库根目录 `render.yaml` 创建服务，构建文件为 `Dockerfile`。
 3. 在云端环境变量填入 `AMAP_API_KEY`（Web 服务平台），禁止写入源码、提交或日志。Render 自动提供 `RENDER_EXTERNAL_HOSTNAME` 和 `PORT`。
 4. `PREVIEW_PASSWORD` 通过 `generateValue: true` 生成，仅在受保护的环境变量界面查看。若手动创建服务，必须填入至少 32 位随机密码。
 5. 健康检查 `/healthz` 只返回 `{"ok": true}`，不创建浏览器身份；所有页面、脚本和业务接口均要求访问密码。

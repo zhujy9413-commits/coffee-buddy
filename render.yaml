@@ -4,7 +4,7 @@ services:
     runtime: docker
     plan: free
     region: singapore
-    dockerfilePath: ./Dockerfile.preview
+    dockerfilePath: ./Dockerfile
     dockerContext: .
     autoDeployTrigger: "off"
     healthCheckPath: /healthz

@@ -1,5 +1,5 @@
 **
-!Dockerfile.preview
+!Dockerfile
 !cloud_preview.py
 !web_app.py
 !web_core.py
