@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from web_core import AppError, BREW_CATEGORIES, Store, extract_photo, search_cafes
+from map_location import location_config, proxy_location_request, allow_sdk_eval
 
 ROOT = Path(__file__).resolve().parent
 
@@ -27,8 +28,9 @@ def load_env():
                 os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 
 
-def make_handler(store):
+def make_handler(store, allowed_hosts=None):
     limits = defaultdict(list)
+    accepted_hosts = frozenset({"localhost", "127.0.0.1", "::1"} if allowed_hosts is None else allowed_hosts)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -44,16 +46,17 @@ def make_handler(store):
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Permissions-Policy", "geolocation=(self), camera=(), microphone=()")
-            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            sdk_sources = " https://webapi.amap.com" if location_config()['provider'] == 'amap' else ""
+            sdk_execution = " 'unsafe-eval'" if allow_sdk_eval() else ""
+            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'" + sdk_sources + sdk_execution + "; connect-src 'self'" + sdk_sources + "; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             if getattr(self, "new_session", False):
                 self.send_header("Set-Cookie", "coffee_session=" + self.owner + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
             self.end_headers()
             self.wfile.write(body)
 
         def prepare(self, mutation=False):
-            allowed_hosts = {"localhost", "127.0.0.1", "::1"}
             host = urlparse("http://" + self.headers.get("Host", "")).hostname
-            if host not in allowed_hosts:
+            if host not in accepted_hosts:
                 raise AppError("此版本仅供本机使用", 403)
             if mutation:
                 if self.headers.get("X-Coffee-Client") != "web-v1":
@@ -91,10 +94,22 @@ def make_handler(store):
                     data = store.state(self.owner)
                     data["brew_catalog"] = BREW_CATEGORIES
                     data["services"] = {"maps": bool(os.getenv("AMAP_API_KEY")), "vision": all(os.getenv(k) for k in ("VISION_ENDPOINT", "VISION_API_KEY", "VISION_MODEL"))}
+                    data['map_location'] = location_config()
                     self.reply(data)
+                elif path.startswith('/_AMapService/'):
+                    if self.new_session or self.headers.get('Sec-Fetch-Site') != 'same-origin':
+                        raise AppError('定位请求来源无效', 403)
+                    now = time.monotonic()
+                    key = 'location:' + self.owner
+                    limits[key] = [t for t in limits[key] if now-t < 60]
+                    if len(limits[key]) >= 20:
+                        raise AppError('定位请求较频繁，请稍后再试', 429)
+                    limits[key].append(now)
+                    body, content_type = proxy_location_request(path, urlparse(self.path).query)
+                    self.reply(body, content_type=content_type)
                 elif path == "/api/export":
                     self.reply(dict(format="coffee-buddy-web-v1", **store.state(self.owner)))
-                elif path in {"/", "/app.js", "/style.css", "/location.js"}:
+                elif path in {"/", "/app.js", "/style.css", "/location.js", "/amap-location.js"}:
                     file = ROOT / "web" / ("index.html" if path == "/" else path[1:])
                     self.reply(file.read_bytes(), content_type=mimetypes.guess_type(file.name)[0] + "; charset=utf-8")
                 else:

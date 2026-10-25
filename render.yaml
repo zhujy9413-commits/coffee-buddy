@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: coffee-buddy-test
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile.preview
+    dockerContext: .
+    autoDeployTrigger: "off"
+    healthCheckPath: /healthz
+    envVars:
+      - key: PREVIEW_PASSWORD
+        generateValue: true
+      - key: AMAP_API_KEY
+        sync: false

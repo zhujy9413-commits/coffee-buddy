@@ -302,13 +302,42 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 403)
 
     def test_static_assets_and_photo_fallback(self):
-        for path in ('/', '/app.js', '/style.css', '/location.js'):
+        for path in ('/', '/app.js', '/style.css', '/location.js', '/amap-location.js'):
             with self.request(path) as response:
                 self.assertEqual(response.status, 200)
                 self.assertIn('nosniff', response.headers['X-Content-Type-Options'])
         with patch.dict(os.environ, {}, clear=True), self.assertRaises(urllib.error.HTTPError) as ctx:
             self.request('/api/extract', {"image": "none"})
         self.assertEqual(ctx.exception.code, 503)
+
+    def test_location_proxy_blocks_cross_site_and_config_keeps_private_keys_server_side(self):
+        with patch.dict(os.environ, {'AMAP_JS_API_KEY':'public-location-key','AMAP_JS_SECURITY_CODE':'private-location-code','AMAP_API_KEY':'private-web-key'}, clear=True):
+            with self.request('/api/state') as response:
+                cookie=response.headers['Set-Cookie'].split(';')[0]
+                state=json.load(response)
+                self.assertEqual(state['map_location']['key'],'public-location-key')
+                self.assertNotIn('private-location-code',json.dumps(state))
+                self.assertNotIn('private-web-key',json.dumps(state))
+                self.assertNotIn('unsafe-eval',response.headers['Content-Security-Policy'])
+            for headers in ({'Cookie':cookie,'Sec-Fetch-Site':'cross-site'},{'Cookie':cookie}, {'Sec-Fetch-Site':'same-origin'}):
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    self.request('/_AMapService/v4/ip',headers=headers)
+                self.assertEqual(ctx.exception.code,403)
+            with patch('web_app.proxy_location_request',return_value=(b'{"status":"1"}','application/json')):
+                with self.request('/_AMapService/v4/ip',headers={'Cookie':cookie,'Sec-Fetch-Site':'same-origin'}) as response:
+                    self.assertEqual(json.load(response)['status'],'1')
+
+    def test_sdk_dynamic_execution_requires_explicit_opt_in_and_paired_keys(self):
+        pair={'AMAP_JS_API_KEY':'public-location-key','AMAP_JS_SECURITY_CODE':'private-location-code'}
+        for config,expected in (({},False),({'AMAP_JS_ALLOW_EVAL':'1'},False),(pair,False),
+                                ({**pair,'AMAP_JS_ALLOW_EVAL':'0'},False),({**pair,'AMAP_JS_ALLOW_EVAL':'1'},True)):
+            with patch.dict(os.environ,config,clear=True):
+                with self.request('/') as response:
+                    policy=response.headers['Content-Security-Policy']
+                    self.assertEqual("'unsafe-eval'" in policy,expected)
+                    self.assertIn("frame-ancestors 'none'",policy)
+                    self.assertIn("form-action 'self'",policy)
+                    self.assertNotIn("'unsafe-inline'",policy)
 
 
 if __name__ == '__main__':

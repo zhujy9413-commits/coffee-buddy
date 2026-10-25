@@ -1,4 +1,4 @@
-import {getLocation} from './location.js';
+import {getCurrentLocation, prefersDeviceLocation} from './location.js';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let state = {records: [], preferences: {}, services: {}};
@@ -29,12 +29,18 @@ $$('[data-tab]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.tab)));
 $$('[data-action="record"]').forEach(b=>b.addEventListener('click',()=>tab('record')));
 async function refresh() {
   state=await api('/api/state');
+  const cloudPreview=state.deployment?.mode==='cloud-preview';
+  $('#deployment-notice').hidden=!cloudPreview;
+  $('#deployment-notice').textContent=cloudPreview?state.deployment.notice:'';
+  $('#storage-hint').textContent=cloudPreview?'记录暂存在云端测试数据库，休眠、重启或重新部署后可能清空。不同浏览器的记录分别保留；请及时导出备份。':'记录保存在这台电脑的本地数据库。浏览器身份不同，记录分别保留；清除 Cookie 前请导出备份。';
+  $('#edition-label').textContent=cloudPreview?'云端测试版 · 请及时导出备份':'本机开发版 · 记录由你掌握';
   $('#record-count').textContent=state.records.filter(r=>r.kind==='tasting').length;
   $('#taste-tags').innerHTML=formatTags([...(state.preferences.flavors||[]),preferenceLabels[state.preferences.coffee_preference||'any']]);
   $('#intro-tags').innerHTML=formatTags([...(state.preferences.brews||[]).slice(0,3),`${state.preferences.city} · ${state.preferences.area}`]);
   renderBrewTypes();
   if(!$('#search-city').value) $('#search-city').value=state.preferences.city||'';
   syncSearchMode();
+  $('#location-hint').textContent=prefersDeviceLocation(state.map_location)?'点击后请求设备定位权限，仅用于本次查店。无需安装地图 App，也无需等待地图组件加载。':'点击后使用高德融合定位，可能通过网络估算。估算位置先由你确认，仅用于本次查店。';
   renderHistory();
   if(!state.services.maps) status('#location-status','地图服务尚未配置。现在可以先记录和整理口味，配置后再查附近店铺。');
   if(!state.services.vision) status('#photo-status','照片识别尚未配置，可先看着照片手动填写。');
@@ -166,11 +172,30 @@ async function searchNearby(historyOnly=false) {
   } catch(e) {if(version===searchVersion){cafes=[];$('#nearby-results').innerHTML='<div class="empty"><h3>这次查询未完成</h3><p>可以稍后重试，或先记下喝过的一杯。</p></div>';status('#location-status',e.message,true);}}
 }
 $('#locate').addEventListener('click',async()=>{
-  const button=$('#locate');button.disabled=true;status('#location-status','等待定位授权与结果……');
-  try{const point=await getLocation();center={location:point,source:'current',center_label:'当前位置'};await searchNearby();}
-  catch(e){status('#location-status',e.message,true);$('#landmark').focus();}
+  const version=++searchVersion;
+  const button=$('#locate');button.disabled=true;status('#location-status',prefersDeviceLocation(state.map_location)?'等待设备定位授权与结果……':'正在使用高德融合定位……');
+  try{
+    const point=await getCurrentLocation(state.map_location);
+    if(version!==searchVersion)return;
+    const approximate=point.approximate||point.accuracy>500;
+    if(approximate) {
+      const accepted=await confirmApproximateLocation(point);
+      if(version!==searchVersion)return;
+      if(!accepted){status('#location-status','已取消使用估算位置，请手动选择地点。');$('#landmark').focus();return;}
+    }
+    center={location:point,source:'current',center_label:approximate?'已确认的估算位置':'当前位置'};await searchNearby();
+  }
+  catch(e){if(version===searchVersion){status('#location-status',e.message,true);$('#landmark').focus();}}
   finally{button.disabled=false;}
 });
+function confirmApproximateLocation(point) {
+  const dialog=$('#location-confirm');
+  $('#estimated-address').textContent=point.label||'暂未返回详细地址，请先在地图中核对位置。';
+  const link=$('#estimated-map');
+  link.href='https://uri.amap.com/marker?position='+encodeURIComponent(point.lng+','+point.lat)+'&name='+encodeURIComponent('待确认的估算位置')+'&coordinate='+(point.system==='gcj02'?'gaode':'wgs84');
+  dialog.returnValue='';
+  return new Promise(resolve=>{dialog.addEventListener('close',()=>resolve(dialog.returnValue==='confirm'),{once:true});dialog.showModal();});
+}
 $('#landmark-form').addEventListener('submit',e=>{e.preventDefault();center={landmark:$('#landmark').value.trim()};searchNearby();});
 $('#search-city').addEventListener('input',()=>{++searchVersion;center=null;$('#place-choices').replaceChildren();});
 function distanceLabel(cafe) {const value=cafe.distance;return Number.isFinite(value)?(value>=1000?(value/1000).toFixed(1)+' km':value+' m'):'距离待确认';}

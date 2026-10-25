@@ -1,0 +1,13 @@
+**
+!Dockerfile.preview
+!cloud_preview.py
+!web_app.py
+!web_core.py
+!map_location.py
+!web/
+web/**
+!web/index.html
+!web/app.js
+!web/style.css
+!web/location.js
+!web/amap-location.js

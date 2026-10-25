@@ -7,3 +7,5 @@
 
 .brew-group>p{font-size:12px;color:var(--muted);margin:12px 0 8px}.brew-item{display:flex;align-items:center;gap:5px;max-width:100%}.brew-item>small{font-size:10px;color:var(--muted);padding-right:4px}.brew-item>select{font-size:11px;min-height:32px;width:auto;max-width:80px;padding:4px}.brew-item .brew-chip{flex-shrink:1;min-width:0}#prefs-dialog{max-height:calc(100dvh - 40px);overflow:auto}
 #brew-suggestions{display:block}
+
+.deployment-notice{margin:20px 0 0;padding:13px 17px;border:1px solid #d8cba4;border-radius:9px;background:#f5edda;color:#6e5830;font-size:12px;line-height:1.8}
