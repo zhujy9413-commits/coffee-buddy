@@ -6,7 +6,7 @@
 
 独立虚构演示入口为 `http://localhost:8767/`，用 `python3 demo_app.py --port 8767` 启动；不读取个人库和密钥配置。批量豆单流程见 [MENU_BATCH.md](MENU_BATCH.md)。
 
-2026-10-25 批量豆单与口味闭环已更新至原 <https://coffee-buddy-test.onrender.com>，运行提交 `e8c2171`；继续使用 Free 临时数据模式和原访问密码。本机数据与独立演示资料没有上传。线上验收通过，iPhone 批量真机测试待用户反馈。见 [CLOUD_TEST.md](CLOUD_TEST.md)。
+2026-10-25 最新照片识别代码已更新至原 <https://coffee-buddy-test.onrender.com>，运行提交 `dead2f6`、部署 `dep-dbetkk5g1s2s73dp1ckg` 为 live。用户已允许丢弃本批云端测试记录并保存百炼三项配置；继续使用 Free 临时模式和原访问密码。32 项云端验收通过，iPhone 批量及反馈闭环已有用户通过反馈，照片实拍仍待用户验收。本机个人数据及独立演示库未上传。见 [CLOUD_TEST.md](CLOUD_TEST.md)。
 
 ## 运行
 
@@ -62,7 +62,7 @@ VISION_MODEL=
 
 填写完整 HTTPS 接口地址和真实支持图片的模型名称。原命令行的文字模型配置不会被当作图片识别服务使用。所选照片仅在用户点击识别后发送给配置的服务。未配置时明确提示，手动记录仍可使用。
 
-2026-10-25 用户选择沿用百炼账号，以 `qwen3-vl-plus` 接入，已通过本机隐藏输入页保存凭据。独立本机页真实调用一次，两款清晰虚构豆单的识别、修改、保存及刷新验证通过。云端尚未配置，iPhone 实拍仍待验收。已补充请求错误分类、45 秒等待、换图结果隔离、照片转新菜单和批量草稿重开保护；详见 [PHOTO_RECOGNITION.md](PHOTO_RECOGNITION.md)。
+2026-10-25 用户选择沿用百炼账号，以 `qwen3-vl-plus` 接入，已通过本机隐藏输入页保存凭据。独立本机页真实调用一次，两款清晰虚构豆单的识别、修改、保存及刷新验证通过。云端随后已保存配置并通过 32 项验收，iPhone 实拍仍待验收。已补充请求错误分类、45 秒等待、换图结果隔离、照片转新菜单和批量草稿重开保护；详见 [PHOTO_RECOGNITION.md](PHOTO_RECOGNITION.md)。
 
 ## 当前定位限制
 
