@@ -85,10 +85,12 @@ class PostgresStore(Store):
         self._database_url = validate_database_url(database_url)
         try:
             import psycopg
+            import certifi
         except ImportError:
-            raise ValueError('云端数据库驱动未安装，已停止启动；不会改用临时数据库') from None
+            raise ValueError('云端数据库驱动或证书包未安装，已停止启动；不会改用临时数据库') from None
         self._connector = connector or psycopg.connect
         self._error_type = psycopg.Error
+        self._root_cert = certifi.where()
         # Reuse the same schema and all domain validation/save/import behavior;
         # initializing through the remote connector does not create a local DB.
         with closing(self.connect()) as con:
@@ -102,7 +104,7 @@ class PostgresStore(Store):
     def connect(self):
         try:
             connection = self._connector(self._database_url, autocommit=True,
-                sslmode='verify-full', sslrootcert='system', channel_binding='require',
+                sslmode='verify-full', sslrootcert=self._root_cert, channel_binding='require',
                 connect_timeout=10, application_name='coffee-buddy',
                 options='-c statement_timeout=15000 -c lock_timeout=10000 -c idle_in_transaction_session_timeout=20000')
         except self._error_type:

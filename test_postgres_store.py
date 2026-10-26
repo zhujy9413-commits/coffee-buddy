@@ -12,6 +12,7 @@ import uuid
 from unittest.mock import patch
 
 import psycopg
+import certifi
 
 from cloud_storage import open_cloud_store
 from postgres_store import PostgresStore, UNAVAILABLE, validate_database_url
@@ -52,7 +53,8 @@ class PostgresConfigurationTests(unittest.TestCase):
         def failed_connector(dsn, **options):
             self.assertEqual(dsn, EXAMPLE_URL)
             self.assertEqual(options['sslmode'], 'verify-full')
-            self.assertEqual(options['sslrootcert'], 'system')
+            self.assertEqual(options['sslrootcert'], certifi.where())
+            self.assertTrue(Path(options['sslrootcert']).is_file())
             self.assertEqual(options['channel_binding'], 'require')
             self.assertEqual(options['connect_timeout'], 10)
             self.assertIn('statement_timeout=15000', options['options'])
