@@ -5,6 +5,8 @@ All mutations take a transaction-scoped advisory lock. This preserves the
 SQLite writer serialization relied on by bulk draft conflict detection.
 """
 from contextlib import closing
+import os
+import socket
 from urllib.parse import parse_qsl, urlsplit
 
 from web_core import AppError, Store
@@ -31,8 +33,12 @@ def connection_error_code(error):
         return 'DB_LIMIT'
     if 'timeout' in message or 'timed out' in message:
         return 'DB_CONNECT_TIMEOUT'
-    if any(value in message for value in ('connection refused', 'network is unreachable', 'server closed the connection')):
-        return 'DB_NETWORK'
+    if 'network is unreachable' in message:
+        return 'DB_NETWORK_UNREACHABLE'
+    if 'connection refused' in message:
+        return 'DB_CONNECTION_REFUSED'
+    if 'server closed the connection' in message:
+        return 'DB_SERVER_CLOSED'
     return 'DB_CONNECT'
 
 
@@ -49,6 +55,19 @@ def validate_database_url(value):
     except (ValueError, TypeError, AttributeError):
         raise ValueError('请配置 Neon 提供的有效数据库连接地址，不要填写网页地址或 API Key') from None
     return value
+
+
+def render_ipv4_address(database_url):
+    """Resolve at connection time; retain the original hostname for TLS/SNI."""
+    if not os.getenv('RENDER_EXTERNAL_HOSTNAME'):
+        return None
+    try:
+        addresses = socket.getaddrinfo(urlsplit(database_url).hostname, 5432,
+                                       socket.AF_INET, socket.SOCK_STREAM)
+        return addresses[0][4][0]
+    except (OSError, IndexError):
+        print('云端数据库连接失败，诊断代码：DB_IPV4_UNAVAILABLE', flush=True)
+        raise AppError(UNAVAILABLE, 503) from None
 
 
 class PostgresConnection:
@@ -124,11 +143,14 @@ class PostgresStore(Store):
             ''')
 
     def connect(self):
+        address = render_ipv4_address(self._database_url)
+        routing = {'hostaddr': address} if address else {}
         try:
             connection = self._connector(self._database_url, autocommit=True,
                 sslmode='verify-full', sslrootcert=self._root_cert, channel_binding='require',
                 connect_timeout=10, application_name='coffee-buddy',
-                options='-c statement_timeout=15000 -c lock_timeout=10000 -c idle_in_transaction_session_timeout=20000')
+                options='-c statement_timeout=15000 -c lock_timeout=10000 -c idle_in_transaction_session_timeout=20000',
+                **routing)
         except self._error_type as error:
             print('云端数据库连接失败，诊断代码：' + connection_error_code(error), flush=True)
             raise AppError(UNAVAILABLE, 503) from None

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import socket
 import tempfile
 import unittest
 import uuid
@@ -15,7 +16,7 @@ import psycopg
 import certifi
 
 from cloud_storage import open_cloud_store
-from postgres_store import PostgresStore, UNAVAILABLE, validate_database_url, connection_error_code
+from postgres_store import PostgresStore, UNAVAILABLE, validate_database_url, connection_error_code, render_ipv4_address
 from web_core import AppError, DEFAULT_PREFS
 
 
@@ -36,7 +37,9 @@ class PostgresConfigurationTests(unittest.TestCase):
                  ('could not translate host name', 'DB_DNS'),
                  ('unsupported startup parameter', 'DB_OPTIONS'),
                  ('timeout expired', 'DB_CONNECT_TIMEOUT'),
-                 ('connection refused', 'DB_NETWORK'),
+                 ('connection refused', 'DB_CONNECTION_REFUSED'),
+                 ('network is unreachable', 'DB_NETWORK_UNREACHABLE'),
+                 ('server closed the connection', 'DB_SERVER_CLOSED'),
                  ('unknown private provider error', 'DB_CONNECT')]
         for message, expected in cases:
             self.assertEqual(connection_error_code(psycopg.OperationalError(message+' '+EXAMPLE_URL)), expected)
@@ -44,6 +47,32 @@ class PostgresConfigurationTests(unittest.TestCase):
             with self.assertRaises(AppError):
                 PostgresStore(EXAMPLE_URL)
         self.assertEqual(output.call_args.args[0], '云端数据库连接失败，诊断代码：DB_CONNECT')
+
+    def test_render_resolves_ipv4_dynamically_without_replacing_tls_hostname(self):
+        address = (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('203.0.113.10', 5432))
+        with patch.dict(os.environ, {'RENDER_EXTERNAL_HOSTNAME': 'coffee-test.onrender.com'}), \
+             patch('postgres_store.socket.getaddrinfo', return_value=[address]) as resolver:
+            self.assertEqual(render_ipv4_address(EXAMPLE_URL), '203.0.113.10')
+            resolver.assert_called_once_with('ep-example.ap-southeast-1.aws.neon.tech', 5432, socket.AF_INET, socket.SOCK_STREAM)
+            def connector(dsn, **options):
+                self.assertEqual(dsn, EXAMPLE_URL)
+                self.assertEqual(options['hostaddr'], '203.0.113.10')
+                self.assertEqual(options['sslmode'], 'verify-full')
+                self.assertNotIn('host', options)
+                raise psycopg.OperationalError('test connection failed')
+            with self.assertRaises(AppError):
+                PostgresStore(EXAMPLE_URL, connector=connector)
+        with patch.dict(os.environ, {}, clear=True), patch('postgres_store.socket.getaddrinfo') as resolver:
+            self.assertIsNone(render_ipv4_address(EXAMPLE_URL))
+            resolver.assert_not_called()
+
+    def test_render_missing_ipv4_fails_without_exposing_dns_error_or_creating_local_store(self):
+        with patch.dict(os.environ, {'RENDER_EXTERNAL_HOSTNAME': 'coffee-test.onrender.com'}), \
+             patch('postgres_store.socket.getaddrinfo', side_effect=socket.gaierror(EXAMPLE_URL)), patch('builtins.print') as output:
+            with self.assertRaises(AppError) as error:
+                render_ipv4_address(EXAMPLE_URL)
+            self.assertEqual(str(error.exception), UNAVAILABLE)
+            self.assertEqual(output.call_args.args[0], '云端数据库连接失败，诊断代码：DB_IPV4_UNAVAILABLE')
 
     def test_invalid_urls_and_extra_connection_options_never_reach_driver(self):
         for value in ['', None, 'https://console.neon.tech', 'postgres://user:secret@localhost/db',
