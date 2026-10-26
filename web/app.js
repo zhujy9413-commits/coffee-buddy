@@ -1,6 +1,7 @@
 import {getCurrentLocation, prefersDeviceLocation} from './location.js';
 import {tastingDraft} from './journal.js';
 import {initMenuBatch} from './menu-batch.js';
+import {initAccounts} from './accounts.js';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let state = {records: [], preferences: {}, services: {}};
@@ -24,7 +25,10 @@ function toast(message) { $('#toast').textContent=message; $('#toast').hidden=fa
 async function api(path, body) {
   const response = await fetch(path, body === undefined ? {credentials:'same-origin'} : {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Coffee-Client':'web-v1'},body:JSON.stringify(body)});
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || '操作未完成，请重试');
+  if (!response.ok) {
+    if(response.status===401&&!path.startsWith('/api/account/')&&state.account?.username)accountsUI.requireLogin();
+    throw new Error(result.error || '操作未完成，请重试');
+  }
   return result;
 }
 function tab(name) { currentTab=name; $$('.view').forEach(e=>e.hidden=e.id!==name); $$('[data-tab]').forEach(e=>e.setAttribute('aria-selected',String(e.dataset.tab===name))); if(name==='nearby'&&selectedBrew&&(center||searchMode()==='taste')&&(cafes.length||recommendationsDirty)) searchNearby(); }
@@ -32,6 +36,7 @@ $$('[data-tab]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.tab)));
 $$('[data-action="record"]').forEach(b=>b.addEventListener('click',()=>tab('record')));
 async function refresh() {
   state=await api('/api/state');
+  accountsUI.render();
   const cloud=state.deployment, persistent=cloud?.ephemeral===false;
   const demo=state.demo?.enabled;
   $('#deployment-notice').hidden=!cloud&&!demo;
@@ -39,6 +44,8 @@ async function refresh() {
   if(persistent&&cloud.backup?.status==='error') $('#deployment-notice').textContent+=' 自动备份暂未完成，请先导出备份。';
   $('#storage-hint').textContent=demo?'演示资料保存在独立测试库，不会修改个人记录。产品与配方均为虚构，不代表店铺实际菜单或在售情况。':persistent&&cloud.backend==='postgres'?'记录保存在独立云端数据库，网页休眠、重启和更新后保留。免费额度有限，请定期导出到自己的设备。不同浏览器的记录分别保留；更换设备或清除 Cookie 前请导出备份。':persistent?'记录保存在云端持久磁盘，每天自动备份，最多保留 14 份。自动备份与原数据在同一磁盘，请定期导出到自己的设备。不同浏览器的记录分别保留；更换设备或清除 Cookie 前请导出备份。':cloud?'记录暂存在云端测试数据库，休眠、重启或重新部署后可能清空。不同浏览器的记录分别保留；请及时导出备份。':'记录保存在这台电脑的本地数据库。浏览器身份不同，记录分别保留；清除 Cookie 前请导出备份。';
   $('#edition-label').textContent=demo?'本机独立演示版 · 虚构测试资料':persistent?'云端个人版 · 记录持续保存':cloud?'云端测试版 · 请及时导出备份':'本机开发版 · 记录由你掌握';
+  if(state.account?.username)$('#storage-hint').textContent=`当前记录属于账号 ${state.account.username}。在同一网站登录，可在其他设备继续使用。${persistent?'记录已持久保存，仍请定期导出备份。':cloud?'此环境的数据仍为临时保存，请及时导出。':'本机服务需保持运行。'}`;
+  else if(persistent)$('#storage-hint').textContent+=' 注册个人账号可认领这些记录，换设备后登录找回。';
   $('#record-count').textContent=state.records.length;
   $('#taste-tags').innerHTML=formatTags([...(state.preferences.flavors||[]),...(state.preferences.roasts||[]),preferenceLabels[state.preferences.coffee_preference||'any']]);
   $('#intro-tags').innerHTML=formatTags([...(state.preferences.brews||[]).slice(0,3),`${state.preferences.city} · ${state.preferences.area}`]);
@@ -273,9 +280,11 @@ $('#extract').addEventListener('click',async()=>{
 $('#prefs-open').onclick=()=>{const f=$('#prefs-form');f.elements.flavors.value=state.preferences.flavors.join('、');f.elements.city.value=state.preferences.city;f.elements.area.value=state.preferences.area;f.elements.coffee_preference.value=state.preferences.coffee_preference||'any';f.querySelectorAll('[name=roasts]').forEach(input=>input.checked=(state.preferences.roasts||[]).includes(input.value));$('#prefs-dialog').showModal();};
 $('#prefs-close').onclick=()=>$('#prefs-dialog').close();
 $('#prefs-form').addEventListener('submit',async e=>{e.preventDefault();const f=e.target;try{await api('/api/preferences',{...state.preferences,flavors:f.elements.flavors.value,city:f.elements.city.value,area:f.elements.area.value,coffee_preference:f.elements.coffee_preference.value,roasts:[...f.querySelectorAll('[name=roasts]:checked')].map(input=>input.value)});++searchVersion;await refresh();$('#prefs-dialog').close();toast('口味偏好已更新');cafes=[];$('#nearby-results').innerHTML='<div class="empty"><h3>按新的偏好，找下一杯</h3><p>选择喜欢的类型和地点后重新查询。</p></div>';if((center||searchMode()==='taste')&&selectedBrew)searchNearby();}catch(error){status('#prefs-status',error.message,true);}});
-$('#export').onclick=async()=>{try{const data=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='coffee-buddy-'+localDate()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){toast(e.message);}};
+async function exportBackup(){const data=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='coffee-buddy-'+localDate()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+$('#export').onclick=()=>exportBackup().catch(e=>toast(e.message));
 $('#import-file').addEventListener('change',async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>6*1024*1024)throw new Error('备份文件过大');const data=JSON.parse(await file.text());const restorePreferences=data.preferences!==undefined;if(!confirm('将备份记录合并到当前记录中？相同编号的记录会更新，其他记录保留。'+(restorePreferences?'备份中的口味偏好和咖啡类型也将替换当前设置。':'')))return;const result=await api('/api/import',data);recommendationsDirty=true;await refresh();toast(`已导入 ${result.count} 条记录${restorePreferences?'，并恢复偏好设置':''}`);}catch(error){toast(error.message);}finally{e.target.value='';}});
 const menuBatch=initMenuBatch({getState:()=>state,getContext:()=>({cafe:$('#cafe').value,address:$('#address').value,source_note:$('#source_note').value,provider_id:$('#record-form').elements.provider_id.value,location:recordLocation}),api,today:localDate,toast,onSaved:async()=>{recommendationsDirty=true;$('#filter-text').value='';$('#filter-brew').value='';$('#filter-reaction').value='';$('#filter-roast').value='';await refresh();if(photoBatchAdded){photoItems=[];photoBatchAdded=false;$('#photo-batch').hidden=true;$('#photo-items').replaceChildren();}tab('history');}});
 $('#photo-batch').onclick=()=>{if(menuBatch.addPhotoItems(photoItems,{image:photoData,warnings:photoWarnings})){photoBatchAdded=true;$('#photo-batch').textContent='继续核对照片豆单';}};
+const accountsUI=initAccounts({getState:()=>state,api,exportBackup,onResume:async()=>{await refresh();toast('已重新登录，尚未保存的填写内容已保留。');}});
 resetForm();
 refresh().catch(e=>{status('#location-status','无法连接本地服务：'+e.message,true);toast('加载失败，请确认本地服务正在运行后刷新页面。');});

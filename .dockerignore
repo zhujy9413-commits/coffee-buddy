@@ -8,6 +8,7 @@
 !storage_backup.py
 !web_app.py
 !web_core.py
+!accounts.py
 !map_location.py
 !web/
 web/**
@@ -19,3 +20,4 @@ web/**
 !web/journal.js
 !web/menu-drafts.js
 !web/menu-batch.js
+!web/accounts.js

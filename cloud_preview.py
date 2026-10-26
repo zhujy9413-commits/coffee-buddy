@@ -49,8 +49,10 @@ def make_cloud_handler(store, hostname, password, backups=None):
             self.connection.settimeout(30)
 
         def prepare(self, mutation=False):
+            self.need_auth = False
             supplied = self.headers.get('Authorization', '').encode('utf-8')
             if not hmac.compare_digest(supplied, expected):
+                self.need_auth = True
                 raise AppError('请输入云端测试版的访问凭据', 401)
             if mutation and self.headers.get('Origin') != origin:
                 raise AppError('请求来源无效', 403)
@@ -64,7 +66,6 @@ def make_cloud_handler(store, hostname, password, backups=None):
                 super().do_GET()
 
         def reply(self, data, status=200, content_type='application/json; charset=utf-8'):
-            self.need_auth = status == 401
             if status == 200 and urlsplit(self.path).path == '/api/state' and isinstance(data, dict):
                 deployment = {'mode': 'cloud-preview', 'ephemeral': True, 'notice': NOTICE}
                 if getattr(store, 'storage_backend', None) == 'postgres':

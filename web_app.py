@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from web_core import AppError, BREW_CATEGORIES, Store, extract_photo, search_cafes
 from map_location import location_config, proxy_location_request, allow_sdk_eval
+from accounts import Accounts
 
 ROOT = Path(__file__).resolve().parent
 
@@ -29,6 +30,7 @@ def load_env():
 
 
 def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
+    accounts = Accounts(store)
     limits = defaultdict(list)
     accepted_hosts = frozenset({"localhost", "127.0.0.1", "::1"} if allowed_hosts is None else allowed_hosts)
 
@@ -50,7 +52,7 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
             sdk_execution = " 'unsafe-eval'" if allow_sdk_eval() else ""
             self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'" + sdk_sources + sdk_execution + "; connect-src 'self'" + sdk_sources + "; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             if getattr(self, "new_session", False):
-                self.send_header("Set-Cookie", session_cookie + "=" + self.owner + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+                self.send_header("Set-Cookie", session_cookie + "=" + self.session_token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
             self.end_headers()
             self.wfile.write(body)
 
@@ -70,14 +72,19 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
             except Exception:
                 cookie = SimpleCookie()
             token = cookie.get(session_cookie)
-            self.owner, self.new_session = store.session(token.value if token else None)
+            self.owner, self.session_token, self.new_session = accounts.resolve(token.value if token else None)
+            if (mutation and token and token.value.startswith('a_') and self.new_session
+                    and not urlparse(self.path).path.startswith('/api/account/')):
+                # Never save an expired account's open draft under a new guest.
+                self.new_session = False
+                raise AppError('个人登录已过期，请重新登录后再保存；当前填写内容尚未保存', 401)
 
-        def body(self):
+        def body(self, maximum=6 * 1024 * 1024):
             if not self.headers.get("Content-Type", "").startswith("application/json"):
                 raise AppError("请求需要 JSON 格式", 415)
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 6 * 1024 * 1024:
+                if not 0 < length <= maximum:
                     raise AppError("请求为空或内容过大", 413)
                 result = json.loads(self.rfile.read(length))
                 if not isinstance(result, dict):
@@ -92,6 +99,7 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
                 path = urlparse(self.path).path
                 if path == "/api/state":
                     data = store.state(self.owner)
+                    data['account'] = accounts.public_state(self.owner)
                     data["brew_catalog"] = BREW_CATEGORIES
                     data["services"] = {"maps": bool(os.getenv("AMAP_API_KEY")), "vision": all(os.getenv(k) for k in ("VISION_ENDPOINT", "VISION_API_KEY", "VISION_MODEL"))}
                     data['map_location'] = location_config()
@@ -109,7 +117,7 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
                     self.reply(body, content_type=content_type)
                 elif path == "/api/export":
                     self.reply(dict(format="coffee-buddy-web-v1", **store.state(self.owner)))
-                elif path in {"/", "/app.js", "/style.css", "/location.js", "/amap-location.js", "/journal.js", "/menu-drafts.js", "/menu-batch.js"}:
+                elif path in {"/", "/app.js", "/style.css", "/location.js", "/amap-location.js", "/journal.js", "/menu-drafts.js", "/menu-batch.js", "/accounts.js"}:
                     file = ROOT / "web" / ("index.html" if path == "/" else path[1:])
                     self.reply(file.read_bytes(), content_type=mimetypes.guess_type(file.name)[0] + "; charset=utf-8")
                 else:
@@ -120,8 +128,22 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
         def do_POST(self):
             try:
                 self.prepare(mutation=True)
-                data, path = self.body(), urlparse(self.path).path
-                if path == "/api/records":
+                path = urlparse(self.path).path
+                data = self.body(16384 if path.startswith('/api/account/') else 6 * 1024 * 1024)
+                if path in ('/api/account/register', '/api/account/login', '/api/account/logout', '/api/account/recovery-code'):
+                    if path.endswith('/register'):
+                        result, owner, token = accounts.register(self.owner, data)
+                    elif path.endswith('/login'):
+                        result, owner, token = accounts.login(self.owner, data, self.session_token)
+                    elif path.endswith('/recovery-code'):
+                        result, owner, token = accounts.rotate_recovery(self.owner, data)
+                    else:
+                        result, owner, token = accounts.logout(self.session_token)
+                    self.owner, self.session_token, self.new_session = owner, token, True
+                    self.reply(result)
+                elif path == '/api/account/recover':
+                    self.reply(accounts.recover(data))
+                elif path == "/api/records":
                     self.reply({"record": store.save(self.owner, data)})
                 elif path == '/api/menu-batch':
                     self.reply(store.save_menu_batch(self.owner, data))
