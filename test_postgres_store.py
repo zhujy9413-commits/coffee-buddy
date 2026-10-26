@@ -32,6 +32,8 @@ def menu(**values):
 class PostgresConfigurationTests(unittest.TestCase):
     def test_connection_diagnostics_are_fixed_codes_and_never_echo_provider_data(self):
         cases = [('certificate verify failed', 'DB_TLS_CERTIFICATE'),
+                 ('could not open certificate file: Permission denied', 'DB_CLIENT_CERT_PATH'),
+                 ('could not get home directory for user', 'DB_CLIENT_CERT_PATH'),
                  ('channel binding required', 'DB_TLS_CHANNEL_BINDING'),
                  ('password authentication failed', 'DB_AUTH'),
                  ('could not translate host name', 'DB_DNS'),
@@ -101,6 +103,7 @@ class PostgresConfigurationTests(unittest.TestCase):
             self.assertEqual(options['sslrootcert'], certifi.where())
             self.assertTrue(Path(options['sslrootcert']).is_file())
             self.assertEqual(options['channel_binding'], 'require')
+            self.assertEqual(options['sslcertmode'], 'disable')
             self.assertEqual(options['connect_timeout'], 10)
             self.assertIn('statement_timeout=15000', options['options'])
             raise psycopg.OperationalError('private connection detail')

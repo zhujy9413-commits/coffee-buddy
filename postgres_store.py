@@ -19,6 +19,9 @@ WRITE_LOCK = 74857109261
 def connection_error_code(error):
     """Fixed diagnostic labels only: never expose a provider message or DSN."""
     message = str(error).lower()
+    if ('permission denied' in message and 'certificate file' in message
+            or 'could not get home directory' in message):
+        return 'DB_CLIENT_CERT_PATH'
     if any(value in message for value in ('certificate verify', 'root certificate', 'unable to get local issuer')):
         return 'DB_TLS_CERTIFICATE'
     if 'channel binding' in message:
@@ -148,6 +151,10 @@ class PostgresStore(Store):
         try:
             connection = self._connector(self._database_url, autocommit=True,
                 sslmode='verify-full', sslrootcert=self._root_cert, channel_binding='require',
+                # Neon uses SCRAM, not client certificates. Avoid probing the
+                # container's root home after privileges have been dropped;
+                # server certificate and hostname verification stay required.
+                sslcertmode='disable',
                 connect_timeout=10, application_name='coffee-buddy',
                 options='-c statement_timeout=15000 -c lock_timeout=10000 -c idle_in_transaction_session_timeout=20000',
                 **routing)
