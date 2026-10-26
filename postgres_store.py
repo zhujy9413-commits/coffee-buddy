@@ -14,6 +14,28 @@ UNAVAILABLE = '云端数据库暂时不可用，尚未确认保存。请保留�
 WRITE_LOCK = 74857109261
 
 
+def connection_error_code(error):
+    """Fixed diagnostic labels only: never expose a provider message or DSN."""
+    message = str(error).lower()
+    if any(value in message for value in ('certificate verify', 'root certificate', 'unable to get local issuer')):
+        return 'DB_TLS_CERTIFICATE'
+    if 'channel binding' in message:
+        return 'DB_TLS_CHANNEL_BINDING'
+    if getattr(error, 'sqlstate', None) in ('28P01', '28000') or 'password authentication failed' in message:
+        return 'DB_AUTH'
+    if any(value in message for value in ('could not translate host', 'name or service not known', 'could not resolve')):
+        return 'DB_DNS'
+    if any(value in message for value in ('unsupported startup parameter', 'unrecognized configuration parameter')):
+        return 'DB_OPTIONS'
+    if any(value in message for value in ('too many connections', 'quota exceeded', 'compute time quota')):
+        return 'DB_LIMIT'
+    if 'timeout' in message or 'timed out' in message:
+        return 'DB_CONNECT_TIMEOUT'
+    if any(value in message for value in ('connection refused', 'network is unreachable', 'server closed the connection')):
+        return 'DB_NETWORK'
+    return 'DB_CONNECT'
+
+
 def validate_database_url(value):
     try:
         url = urlsplit(value)
@@ -107,6 +129,7 @@ class PostgresStore(Store):
                 sslmode='verify-full', sslrootcert=self._root_cert, channel_binding='require',
                 connect_timeout=10, application_name='coffee-buddy',
                 options='-c statement_timeout=15000 -c lock_timeout=10000 -c idle_in_transaction_session_timeout=20000')
-        except self._error_type:
+        except self._error_type as error:
+            print('云端数据库连接失败，诊断代码：' + connection_error_code(error), flush=True)
             raise AppError(UNAVAILABLE, 503) from None
         return PostgresConnection(connection, self._error_type)

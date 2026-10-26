@@ -15,7 +15,7 @@ import psycopg
 import certifi
 
 from cloud_storage import open_cloud_store
-from postgres_store import PostgresStore, UNAVAILABLE, validate_database_url
+from postgres_store import PostgresStore, UNAVAILABLE, validate_database_url, connection_error_code
 from web_core import AppError, DEFAULT_PREFS
 
 
@@ -29,6 +29,22 @@ def menu(**values):
 
 
 class PostgresConfigurationTests(unittest.TestCase):
+    def test_connection_diagnostics_are_fixed_codes_and_never_echo_provider_data(self):
+        cases = [('certificate verify failed', 'DB_TLS_CERTIFICATE'),
+                 ('channel binding required', 'DB_TLS_CHANNEL_BINDING'),
+                 ('password authentication failed', 'DB_AUTH'),
+                 ('could not translate host name', 'DB_DNS'),
+                 ('unsupported startup parameter', 'DB_OPTIONS'),
+                 ('timeout expired', 'DB_CONNECT_TIMEOUT'),
+                 ('connection refused', 'DB_NETWORK'),
+                 ('unknown private provider error', 'DB_CONNECT')]
+        for message, expected in cases:
+            self.assertEqual(connection_error_code(psycopg.OperationalError(message+' '+EXAMPLE_URL)), expected)
+        with patch('builtins.print') as output, patch('psycopg.connect', side_effect=psycopg.OperationalError(EXAMPLE_URL)):
+            with self.assertRaises(AppError):
+                PostgresStore(EXAMPLE_URL)
+        self.assertEqual(output.call_args.args[0], '云端数据库连接失败，诊断代码：DB_CONNECT')
+
     def test_invalid_urls_and_extra_connection_options_never_reach_driver(self):
         for value in ['', None, 'https://console.neon.tech', 'postgres://user:secret@localhost/db',
                       'postgres://user:secret@fake.neon.tech.evil.test/db',
