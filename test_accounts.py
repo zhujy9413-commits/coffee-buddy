@@ -16,8 +16,8 @@ from accounts import Accounts, SESSION_SECONDS, password_hash, token_hash
 from cloud_preview import make_cloud_handler
 from web_core import AppError, Store
 
-SECRET = 'Only-for-account-tests-2026!'
-NEXT_SECRET = 'Next-account-test-password-2026!'
+SECRET = 'QaPass-2026-Abc!'
+NEXT_SECRET = 'NextPass-2026-Xy!'
 
 
 class AccountContract:
@@ -37,12 +37,12 @@ class AccountContract:
         before = self.store.state(self.owner)
         result, owner, raw = self.register('TesTer')
         self.assertEqual(owner, self.owner)
-        self.assertEqual(result['username'], 'tester')
+        self.assertEqual(result['username'], 'TesTer')
         self.assertEqual(self.store.state(owner), before)
         self.assertNotEqual(raw, self.owner)
         self.assertEqual(self.auth.resolve(raw), (owner, raw, False))
         self.assertNotEqual(self.auth.resolve(self.owner)[0], owner)
-        self.assertEqual(self.auth.public_state(owner), {'username': 'tester'})
+        self.assertEqual(self.auth.public_state(owner), {'username': 'TesTer'})
         with closing(self.store.connect()) as con:
             password_stored, recovery_stored = con.execute('SELECT password_hash,recovery_hash FROM accounts WHERE owner=?', (owner,)).fetchone()
             tokens = con.execute('SELECT token_hash FROM account_sessions WHERE owner=?', (owner,)).fetchall()
@@ -55,11 +55,47 @@ class AccountContract:
         self.register()
         row = self.store.save(self.owner, {'product': '跨设备测试记录'})
         reopened = Accounts(self.store, clock=lambda: self.now[0])
-        _, owner, raw = reopened.login(self.other, {'username': 'TESTER', 'password': SECRET})
+        _, owner, raw = reopened.login(self.other, {'username': 'tester', 'password': SECRET})
         self.assertEqual(owner, self.owner)
         self.assertEqual(reopened.resolve(raw)[0], self.owner)
         self.assertEqual(self.store.state(owner)['records'][0]['id'], row['id'])
         self.assertEqual(self.store.state(self.other)['records'], [])
+
+    def test_username_case_is_preserved_distinct_and_required_for_login_and_recovery(self):
+        upper, _, _ = self.register('CoffeeFan')
+        lower, _, _ = self.auth.register(self.other, {'username': 'coffeefan', 'password': NEXT_SECRET})
+        for name, secret, owner in [('CoffeeFan', SECRET, self.owner), ('coffeefan', NEXT_SECRET, self.other)]:
+            self.assertEqual(self.auth.login(self.store.session(None)[0], {'username': name, 'password': secret})[1], owner)
+        with self.assertRaises(AppError):
+            self.auth.login(self.other, {'username': 'coffeefan', 'password': SECRET})
+        with self.assertRaises(AppError):
+            self.auth.recover({'username': 'coffeefan', 'recovery_code': upper['recovery_code'], 'password': SECRET})
+        self.assertEqual(self.auth.public_state(self.owner), {'username': 'CoffeeFan'})
+        self.assertEqual(self.auth.public_state(self.other), {'username': 'coffeefan'})
+
+    def test_new_and_reset_password_boundaries_are_eight_through_twenty(self):
+        for secret in ['1'*7, '1'*21]:
+            with self.assertRaises(AppError):
+                self.auth.register(self.owner, {'username': 'boundary', 'password': secret})
+        result, _, _ = self.auth.register(self.owner, {'username': 'boundary', 'password': 'aB12!xyz'})
+        self.assertEqual(self.auth.login(self.other, {'username': 'boundary', 'password': 'aB12!xyz'})[1], self.owner)
+        for secret in ['1'*7, '1'*21]:
+            with self.assertRaises(AppError):
+                self.auth.recover({'username': 'boundary', 'recovery_code': result['recovery_code'], 'password': secret})
+        self.auth.recover({'username': 'boundary', 'recovery_code': result['recovery_code'], 'password': 'aB12!xyz'*2+'abcd'})
+        self.assertEqual(self.auth.login(self.other, {'username': 'boundary', 'password': 'aB12!xyz'*2+'abcd'})[1], self.owner)
+
+    def test_preexisting_lowercase_account_and_long_password_still_work(self):
+        legacy = 'Former-test-password-more-than-20!'
+        with closing(self.store.connect()) as con, con:
+            con.execute('INSERT INTO accounts VALUES (?,?,?,?,?)',
+                        (self.owner, 'legacy_user', password_hash(legacy), 'old-recovery-placeholder', int(self.now[0])))
+        row = self.store.save(self.owner, {'product': '升级前已有记录'})
+        self.assertEqual(self.auth.login(self.other, {'username': 'legacy_user', 'password': legacy})[1], self.owner)
+        code, _, _ = self.auth.rotate_recovery(self.owner, {'password': legacy})
+        self.auth.recover({'username': 'legacy_user', 'recovery_code': code['recovery_code'], 'password': SECRET})
+        self.assertEqual(self.auth.login(self.other, {'username': 'legacy_user', 'password': SECRET})[1], self.owner)
+        self.assertEqual(self.store.state(self.owner)['records'][0]['id'], row['id'])
 
     def test_wrong_password_is_generic_and_limit_survives_new_service(self):
         self.register()

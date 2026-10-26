@@ -49,9 +49,9 @@
  <p class="eyebrow">YOUR COFFEE ACCOUNT</p><h2 id="account-title">让记录跟着你。</h2>
  <div id="account-guest"><p class="muted">注册会认领当前浏览器的记录。以后在这一个网站登录，就能换设备继续使用。</p>
  <label for="account-mode">我要</label><select id="account-mode"><option value="register">创建个人账号</option><option value="login">登录已有账号</option><option value="recover">用恢复码重设密码</option></select>
- <form id="account-form"><label for="account-username">用户名</label><input id="account-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9_]{3,32}" minlength="3" maxlength="32" required><p class="hint">3—32 位字母、数字或下划线，不区分大小写。</p>
- <label id="account-password-label" for="account-password">密码</label><input id="account-password" name="password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required><p id="account-password-hint" class="hint">15—128 个字符，可以使用空格和中文。建议保存到系统密码管理器。</p>
- <div id="account-confirm-field"><label for="account-confirm">再输入一次密码</label><input id="account-confirm" type="password" autocomplete="new-password" minlength="15" maxlength="128" required></div>
+ <form id="account-form"><label for="account-username">用户名</label><input id="account-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9_]{3,32}" minlength="3" maxlength="32" required><p class="hint">3—32 位字母、数字或下划线，区分大小写，登录和找回时请保持一致。</p>
+ <label id="account-password-label" for="account-password">密码</label><input id="account-password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="20" required><p id="account-password-hint" class="hint">8—20 个字符，可以使用空格和中文。建议保存到系统密码管理器。</p>
+ <div id="account-confirm-field"><label for="account-confirm">再输入一次密码</label><input id="account-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="20" required></div>
  <div id="account-recover-field" hidden><label for="account-recovery">恢复码</label><input id="account-recovery" name="recovery_code" type="password" autocomplete="off" maxlength="100"><p class="hint">重设后所有设备需重新登录，旧恢复码失效，并生成一份新恢复码。</p></div>
  <div id="account-switch" hidden><p class="hint">当前有未绑定本账号的记录，登录不会自动合并。先导出，登录后可导入合并。</p><button type="button" id="account-export" class="secondary">先导出当前记录</button><label class="checkbox"><input type="checkbox" id="account-switch-confirm">我已保存需要保留的记录，确认切换</label></div>
  <button class="primary full" id="account-submit" type="submit">注册并认领当前记录</button></form></div>

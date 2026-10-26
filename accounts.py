@@ -35,12 +35,12 @@ RECOVERY_ERROR = '用户名或恢复码不正确'
 def username(value):
     if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_]{3,32}', value):
         raise AppError('用户名需为 3—32 位字母、数字或下划线')
-    return value.lower()
+    return value
 
 
 def password(value):
-    if not isinstance(value, str) or not 15 <= len(value) <= 128:
-        raise AppError('密码需为 15—128 个字符，可以使用空格和中文')
+    if not isinstance(value, str) or not 8 <= len(value) <= 20:
+        raise AppError('密码需为 8—20 个字符，可以使用空格和中文')
     return value
 
 
@@ -63,6 +63,7 @@ def password_hash(value, salt=None):
 
 def password_matches(value, stored):
     # Fixed bounded parameters even if a stored hash is malformed.
+    # Existing passwords from the former 15–128 policy remain valid at login.
     if not isinstance(value, str) or len(value) > 128:
         return False
     try:

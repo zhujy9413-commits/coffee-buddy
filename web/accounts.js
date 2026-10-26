@@ -18,7 +18,8 @@ export function initAccounts({getState, api, exportBackup, onResume}) {
     $('#account-recover-field').hidden=!recover;
     $('#account-recovery').disabled=!recover;
     $('#account-recovery').required=recover;
-    $('#account-password').minLength=login?1:15;
+    $('#account-password').minLength=login?1:8;
+    $('#account-password').maxLength=login?128:20;
     $('#account-password').autocomplete=login?'current-password':'new-password';
     $('#account-password-label').textContent=recover?'新密码':'密码';
     $('#account-password-hint').hidden=login;
