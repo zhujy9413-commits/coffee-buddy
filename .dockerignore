@@ -21,3 +21,9 @@ web/**
 !web/menu-drafts.js
 !web/menu-batch.js
 !web/accounts.js
+!web/manifest.webmanifest
+!web/icons/
+web/icons/**
+!web/icons/icon-180.png
+!web/icons/icon-192.png
+!web/icons/icon-512.png
