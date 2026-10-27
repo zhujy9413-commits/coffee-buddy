@@ -1,92 +1,53 @@
-# ☕ 咖啡探索搭子（Coffee Buddy）
+# 咖啡探索搭子 · Coffee Buddy
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-blue.svg)
-![Tests](https://github.com/zhujy9413-commits/coffee-buddy/actions/workflows/test.yml/badge.svg)
+记录咖啡菜单与饮用体验，根据个人风味、烘焙和饮品偏好，提供有来源、可解释的店铺与产品候选。
 
-一个**个人 Agent**：整理咖啡馆、豆单与菜单，记住口味偏好，推荐下一次尝试并解释理由。
+## 当前状态
 
-由 [Agent Blueprint](../agent-blueprint/) 推导出的 **Step 5 骨架**（第一层「骨架」），集成 8 个组件：
-`s01 循环 + s02 工具 + s03 权限 + s04 钩子 + s07 技能 + s09 记忆 + s14 外部工具 + s15 集成`。
+文档更新于 2026-10-28，反映已部署的运行源码 `9bdc41c`。本次仅整理文档，不改变运行程序或重新部署。
 
-> 📄 需求与决策以 [PRD.md](PRD.md) 为唯一事实基线。
+- 支持手动录入、照片识别草稿、1—20 款批量豆单及逐款人工核对。
+- 菜单标注与实际饮用感受分别保存；明确区分喜欢、一般、还说不准和不太喜欢。
+- 支持就近原则、口味原则和指定目的地；未知店铺产品、配方和当前在售情况不推测。
+- 云端使用个人账号登录和独立 PostgreSQL 数据库，支持跨设备取回记录与偏好；已移除共用测试入口密码。
+- iPhone 可通过 Safari 添加到主屏幕，显示“咖啡搭子”图标；使用时需要联网。
+- 照片识别和实时找店要求登录，并有持久化的账号及全站请求上限。
 
-## 本次进度与后续开发
+这是用于个人及小规模朋友试用的网页产品。真实复杂菜单识别、推荐的长期帮助程度和多人持续使用效果仍需验证。
 
-本机网页版本的已完成内容、验证情况和下次开发起点见 [PROGRESS.md](PROGRESS.md)。地图服务已完成本机真实接口和手动地标查找联调；桌面“使用当前位置”超时仍待排查，照片识别及手机真实定位仍待验证。
-
-## 手机网页开发版
-
-新增手机布局的网页入口，运行 `python3 web_app.py`，电脑访问 `http://127.0.0.1:8765`。记录与筛选无需安装依赖；地图和照片识别分别可选配置。当前为本机开发版，手机在线试用仍需要 HTTPS 部署与正式访问身份。详见 [WEB_DEV.md](WEB_DEV.md)。原 CLI 入口保留。
-
-## 快速开始
+## 本机运行
 
 ```sh
-# 1. 建环境（Python 3.10+）
-python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-# 2. 配置
-cp .env.example .env      # 填 ANTHROPIC_API_KEY（DeepSeek 用上面的 base_url 即可）
-                          # AMAP_API_KEY 可选
-
-# 3. 运行
-.venv/bin/python agent.py
+python3 web_app.py --port 8765
 ```
 
-## 对话示例
+浏览器打开 <http://127.0.0.1:8765/>。本机基础记录使用 Python 标准库和 SQLite；地图与照片识别可选，配置见 [本机开发](WEB_DEV.md)。本机访客流程与云端个人账号要求分别说明，不把本机服务直接暴露到公网。
 
-```
->> 记一下：Manner 的埃塞俄比亚水洗豆，偏酸，有柑橘香
-   [权限确认] 是否允许 save_record(...)？[y/N] y
->> 想喝偏酸的豆子
-   （Agent 自动：查记录 → 查偏好 → 补知识 → 组织推荐 → 自检 → 输出）
-```
+## 文档导航
 
-## 口味画像
+| 文档 | 内容 |
+| --- | --- |
+| [PRD](PRD.md) | 当前需求、规则及验收边界 |
+| [开发进度](PROGRESS.md) | 已交付能力和验证结果 |
+| [开发交接](SESSION_HANDOFF.md) | 当前维护起点与后续工作 |
+| [云端运行](CLOUD_TEST.md) | 个人登录、外部服务上限与发布检查 |
+| [个人账号](ACCOUNTS.md) | 注册、跨设备、恢复码与会话 |
+| [免费持久保存](FREE_STORAGE.md) | PostgreSQL、导出恢复与故障行为 |
+| [照片识别](PHOTO_RECOGNITION.md) | 识别草稿和人工核对 |
+| [批量豆单](MENU_BATCH.md) | 文本格式、逐款确认和整批保存 |
+| [口味闭环](TASTE_LOOP.md) | 反馈、分店关联和推荐依据 |
+| [手机使用与验收](PHONE_TEST.md) | 主屏幕、权限和真机验证 |
+| [可选磁盘方案](PERSISTENT_STORAGE.md) | 未启用的另一种存储方案 |
+
+## 开发检查
 
 ```sh
-.venv/bin/python agent.py --profile   # 打印口味画像报告（偏好/避开/排除清单/最近记录）
-```
-
-## 测试（硬化）
-
-```sh
-.venv/bin/pip install pytest
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt -r requirements-cloud.txt pytest
 .venv/bin/python -m pytest -q
+node --test test_location.mjs test_amap_location.mjs test_journal.mjs test_menu_drafts.mjs
 ```
 
-## 目录结构
+PostgreSQL 合同测试使用独立测试数据库，通过 `COFFEE_TEST_POSTGRES_DSN` 配置；未配置时相应检查跳过。GitHub CI 提供隔离 PostgreSQL，不能用生产数据库执行测试。
 
-```
-agent.py              # 主程序：单一循环 + 8 组件集成
-coffee_knowledge/     # 咖啡知识卡（s07 按需加载）：风味/产地/处理/烘焙/冲煮
-data/                 # 本地记忆（s09，自动生成）：records.json / feedback.json
-.trajectories/        # 轨迹数据（可观测性，自动生成）
-.env.example          # 配置模板
-config.example.yaml   # 可选声明式配置
-```
-
-## 工具清单
-
-| 工具 | 权限 | 说明 |
-|---|---|---|
-| query_records | allow | 查本地记录，取候选集（可按风味/关键词/产地/烘焙/位置过滤） |
-| load_preference | allow | 读口味偏好 + 「踩」排除清单 |
-| load_coffee_knowledge | allow | 按需加载咖啡知识卡 |
-| search_nearby_cafes | allow | 高德 POI 搜索（未配 Key 自动降级） |
-| save_record | **ask** | 写记录，需用户确认（可带产地/处理/烘焙/冲煮/价格/位置/评分） |
-| save_feedback | **ask** | 写正/负反馈，需用户确认 |
-| validate_recommendation | allow | 输出前自检三要素 + 可溯源 |
-
-## 边界（写死在代码里，不只是提示词）
-
-- 拦截下单/付款/政治/医疗等关键词（s04 PreToolUse 硬拦截）
-- 写入类操作必须用户确认（s03 权限）
-- 推荐理由必须可溯源，禁止编造（validate_recommendation）
-- 数据默认只存本机 `data/`（s09 本地记忆）
-
-## 下一步（硬化 → 产品化）
-
-本骨架可运行。后续按需加入：错误处理与超时细化、单测（工具分派/权限边界）、
-更多外部数据源（MCP server）、后台任务与定时推荐等。
+原 `agent.py` 命令行入口保留；它与网页使用不同的数据路径，不自动合并原 CLI JSON。配置示例见 `.env.example`，真实配置、数据库、照片、备份和个人资料不进入仓库。
