@@ -24,12 +24,23 @@ CREATE TABLE IF NOT EXISTS account_sessions (
 CREATE TABLE IF NOT EXISTS account_attempts (
  attempt_key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, window_start BIGINT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS service_usage (
+ service TEXT NOT NULL, scope TEXT NOT NULL, window_seconds INTEGER NOT NULL,
+ window_start BIGINT NOT NULL, attempts INTEGER NOT NULL,
+ PRIMARY KEY(service,scope,window_seconds,window_start)
+);
 '''
 SESSION_SECONDS = 30 * 24 * 60 * 60
 WINDOW_SECONDS = 15 * 60
 HASH_SLOTS = threading.BoundedSemaphore(2)
 LOGIN_ERROR = '用户名或密码不正确'
 RECOVERY_ERROR = '用户名或恢复码不正确'
+# Request budgets, not provider billing units. Reserve before calling a service;
+# failed attempts also count. Daily windows reset at midnight in China (UTC+8).
+SERVICE_LIMITS = {
+    'vision': ('照片识别', 2, 10, 6, 40),
+    'maps': ('找店查询', 10, 60, 40, 300),
+}
 
 
 def username(value):
@@ -118,6 +129,35 @@ class Accounts:
         with closing(self.store.connect()) as con:
             row = con.execute('SELECT username FROM accounts WHERE owner=?', (owner,)).fetchone()
         return {'username': row[0] if row else None}
+
+    def consume_service(self, owner, service):
+        label, user_minute, user_day, global_minute, global_day = SERVICE_LIMITS[service]
+        now = int(self.clock())
+        day_start = ((now + 8 * 3600) // 86400) * 86400 - 8 * 3600
+        user_scope = token_hash('service-user:' + owner)
+        windows = [(user_scope, 60, now // 60 * 60, user_minute),
+                   (user_scope, 86400, day_start, user_day),
+                   ('global', 60, now // 60 * 60, global_minute),
+                   ('global', 86400, day_start, global_day)]
+        with closing(self.store.connect()) as con, con:
+            con.execute('BEGIN IMMEDIATE')
+            if not con.execute('SELECT 1 FROM accounts WHERE owner=?', (owner,)).fetchone():
+                raise AppError('请先登录个人账号后再使用', 401)
+            con.execute('DELETE FROM service_usage WHERE window_start<?', (day_start,))
+            for scope, seconds, start, maximum in windows:
+                row = con.execute('SELECT attempts FROM service_usage WHERE service=? AND scope=? '
+                                  'AND window_seconds=? AND window_start=?',
+                                  (service, scope, seconds, start)).fetchone()
+                if row and row[0] >= maximum:
+                    if seconds == 60:
+                        raise AppError(label + '请求较频繁，请一分钟后重试', 429)
+                    message = ('今天的' + label + '次数已用完，请明天再试' if scope != 'global'
+                               else '今天的共享' + label + '额度已用完，请明天再试')
+                    raise AppError(message + '；仍可手动记录和查看已有记录', 429)
+            for scope, seconds, start, _ in windows:
+                con.execute('INSERT INTO service_usage VALUES (?,?,?,?,1) ON CONFLICT '
+                            '(service,scope,window_seconds,window_start) DO UPDATE '
+                            'SET attempts=service_usage.attempts+1', (service, scope, seconds, start))
 
     def _attempt(self, action, name):
         # Both limits survive service restarts; new guest cookies cannot bypass

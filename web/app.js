@@ -26,7 +26,7 @@ async function api(path, body) {
   const response = await fetch(path, body === undefined ? {credentials:'same-origin'} : {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Coffee-Client':'web-v1'},body:JSON.stringify(body)});
   const result = await response.json();
   if (!response.ok) {
-    if(response.status===401&&!path.startsWith('/api/account/')&&state.account?.username)accountsUI.requireLogin();
+    if(response.status===401&&!path.startsWith('/api/account/'))accountsUI.requireLogin();
     throw new Error(result.error || '操作未完成，请重试');
   }
   return result;
@@ -193,6 +193,7 @@ async function searchNearby(historyOnly=false) {
   } catch(e) {if(version===searchVersion){cafes=[];$('#nearby-results').innerHTML='<div class="empty"><h3>这次查询未完成</h3><p>可以稍后重试，或先记下喝过的一杯。</p></div>';status('#location-status',e.message,true);}}
 }
 $('#locate').addEventListener('click',async()=>{
+  if(state.deployment?.login_required&&!state.account?.username){accountsUI.requireLogin();return;}
   const version=++searchVersion;
   const button=$('#locate');button.disabled=true;status('#location-status',prefersDeviceLocation(state.map_location)?'等待设备定位授权与结果……':'正在使用高德融合定位……');
   try{

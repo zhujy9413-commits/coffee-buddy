@@ -36,7 +36,7 @@ def load_env():
                 os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 
 
-def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
+def make_handler(store, allowed_hosts=None, session_cookie='coffee_session', require_account=False):
     accounts = Accounts(store)
     limits = defaultdict(list)
     accepted_hosts = frozenset({"localhost", "127.0.0.1", "::1"} if allowed_hosts is None else allowed_hosts)
@@ -73,6 +73,9 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
                 origin = self.headers.get("Origin")
                 if origin and urlparse(origin).netloc != self.headers.get("Host"):
                     raise AppError("请求来源无效", 403)
+            path = urlparse(self.path).path
+            if not mutation and not (path.startswith('/api/') or path.startswith('/_AMapService/')):
+                return  # Public static files never create a guest identity.
             cookie = SimpleCookie()
             try:
                 cookie.load(self.headers.get("Cookie", ""))
@@ -85,6 +88,11 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
                 # Never save an expired account's open draft under a new guest.
                 self.new_session = False
                 raise AppError('个人登录已过期，请重新登录后再保存；当前填写内容尚未保存', 401)
+            if (require_account and (mutation or path == '/api/export' or path.startswith('/_AMapService/'))
+                    and not path.startswith('/api/account/')
+                    and not accounts.public_state(self.owner)['username']):
+                self.new_session = False
+                raise AppError('请先注册或登录个人账号后再使用；当前填写内容尚未保存', 401)
 
         def body(self, maximum=6 * 1024 * 1024):
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -112,6 +120,8 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
                     data['map_location'] = location_config()
                     self.reply(data)
                 elif path.startswith('/_AMapService/'):
+                    if require_account:
+                        raise AppError('此云端版本使用设备定位', 404)
                     if self.new_session or self.headers.get('Sec-Fetch-Site') != 'same-origin':
                         raise AppError('定位请求来源无效', 403)
                     now = time.monotonic()
@@ -168,8 +178,13 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
                 elif path == "/api/import":
                     self.reply({"count": store.import_records(self.owner, data)})
                 elif path == "/api/nearby":
+                    history_only = data.get('mode') == 'taste' and not (data.get('location') or data.get('landmark'))
+                    if require_account and not history_only:
+                        accounts.consume_service(self.owner, 'maps')
                     self.reply(search_cafes(data, store.state(self.owner)))
                 elif path == "/api/extract":
+                    if require_account:
+                        accounts.consume_service(self.owner, 'vision')
                     now = time.monotonic()
                     limits[self.owner] = [t for t in limits[self.owner] if now - t < 60]
                     if len(limits[self.owner]) >= 5:

@@ -111,6 +111,51 @@ class AccountContract:
         with self.assertRaisesRegex(AppError, '用户名或密码不正确'):
             self.auth.login(self.other, {'username': 'missing', 'password': SECRET})
 
+    def test_service_usage_requires_an_account_and_reservations_are_atomic(self):
+        with self.assertRaises(AppError) as error:
+            self.auth.consume_service(self.owner, 'vision')
+        self.assertEqual(error.exception.status,401)
+        self.register()
+        def reserve(_):
+            try:
+                self.auth.consume_service(self.owner,'vision')
+                return 200
+            except AppError as error:
+                return error.status
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results=list(pool.map(reserve,range(8)))
+        self.assertEqual(results.count(200),2)
+        self.assertEqual(results.count(429),6)
+        with closing(self.store.connect()) as con:
+            self.assertEqual(con.execute('SELECT attempts FROM service_usage').fetchall(),[(2,)]*4)
+
+    def test_service_daily_limit_survives_relogin_and_service_restart(self):
+        self.register()
+        for _ in range(10):
+            self.auth.consume_service(self.owner,'vision')
+            self.now[0]+=61
+        reopened=Accounts(self.store,clock=lambda:self.now[0])
+        _,owner,_=reopened.login(self.other,{'username':'tester','password':SECRET})
+        with self.assertRaisesRegex(AppError,'明天') as error:
+            reopened.consume_service(owner,'vision')
+        self.assertEqual(error.exception.status,429)
+        # A request using saved history does not consume either external service.
+        self.auth.consume_service(owner,'maps')
+
+    def test_shared_daily_budget_cannot_be_bypassed_with_another_account(self):
+        self.register()
+        self.auth.register(self.other,{'username':'second_tester','password':SECRET})
+        with patch('accounts.SERVICE_LIMITS',{'vision':('照片识别',20,2,30,3)}):
+            self.auth.consume_service(self.owner,'vision')
+            self.auth.consume_service(self.owner,'vision')
+            self.auth.consume_service(self.other,'vision')
+            with self.assertRaisesRegex(AppError,'共享'):
+                self.auth.consume_service(self.other,'vision')
+            with closing(self.store.connect()) as con:
+                self.assertEqual(con.execute("SELECT attempts FROM service_usage WHERE scope='global' AND window_seconds=86400").fetchone()[0],3)
+            self.now[0]=((self.now[0]+8*3600)//86400+1)*86400-8*3600
+            self.auth.consume_service(self.other,'vision')
+
     def test_recovery_is_single_use_revokes_every_session_and_requires_fresh_login(self):
         result, _, first = self.register()
         _, _, second = self.auth.login(self.other, {'username': 'tester', 'password': SECRET})
@@ -238,7 +283,7 @@ class AccountHttpTests(unittest.TestCase):
         self.store = Store(Path(self.folder.name) / 'http.sqlite3')
         self.host = 'coffee-test.onrender.com'
         self.access = 'Basic ' + base64.b64encode(b'coffee:test-only-password-01234567890123456789').decode()
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), make_cloud_handler(self.store, self.host, 'test-only-password-01234567890123456789'))
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), make_cloud_handler(self.store, self.host))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True);self.thread.start()
 
     def tearDown(self):
@@ -259,7 +304,10 @@ class AccountHttpTests(unittest.TestCase):
 
     def test_http_claim_login_logout_cookie_rotation_export_and_isolation(self):
         _, h, _ = self.call('/api/state');guest=self.cookie(h)
-        self.assertEqual(self.call('/api/records',guest,{'product':'HTTP 访客记录'})[0],200)
+        # Preserve pre-upgrade guest data for account claiming; new cloud guests
+        # must sign in before writing records or invoking external services.
+        self.assertEqual(self.call('/api/records',guest,{'product':'HTTP 访客记录'})[0],401)
+        self.store.save(guest.split('=',1)[1], {'product':'HTTP 访客记录'})
         status,h,result=self.call('/api/account/register',guest,{'username':'http_test','password':SECRET})
         self.assertEqual(status,200);account=self.cookie(h)
         self.assertNotEqual(account,guest)

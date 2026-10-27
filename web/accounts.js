@@ -1,7 +1,7 @@
 // Account secrets stay in the dialog's memory; never in browser storage or URLs.
 export function initAccounts({getState, api, exportBackup, onResume}) {
   const $=s=>document.querySelector(s), dialog=$('#account-dialog');
-  let pending=false, receipt=false, forcedLogin=false;
+  let pending=false, receipt=false, forcedLogin=false, welcomeShown=false;
   const message=(value,error=false)=>{const el=$('#account-status');el.textContent=value;el.classList.toggle('error',error);};
   function render() {
     const name=getState().account?.username;
@@ -9,6 +9,13 @@ export function initAccounts({getState, api, exportBackup, onResume}) {
     $('#account-guest').hidden=!!name&&!forcedLogin;
     $('#account-known').hidden=!name||forcedLogin;
     $('#account-name').textContent=name?`当前账号：${name}`:'';
+    $('#account-guest-hint').textContent=getState().deployment?.login_required
+      ?'用自己的账号保存记录和偏好。已有账号请直接登录；朋友首次使用可选择创建个人账号。'
+      :'注册会认领当前浏览器的记录。以后在这一个网站登录，就能换设备继续使用。';
+    if(getState().deployment?.login_required&&!name&&!welcomeShown&&!receipt){
+      welcomeShown=true;$('#account-mode').value='login';
+      if(!dialog.open)dialog.showModal();
+    }
     mode();
   }
   function mode() {
@@ -26,7 +33,7 @@ export function initAccounts({getState, api, exportBackup, onResume}) {
     const switching=login&&!getState().account?.username&&getState().records.length>0;
     $('#account-switch').hidden=!switching;
     $('#account-switch-confirm').required=switching;
-    $('#account-submit').textContent=login?'登录个人账号':recover?'验证恢复码并重设密码':'注册并认领当前记录';
+    $('#account-submit').textContent=login?'登录个人账号':recover?'验证恢复码并重设密码':getState().records.length?'注册并认领当前记录':'创建个人账号';
   }
   function clearSecrets() {
     for(const id of ['#account-password','#account-confirm','#account-recovery','#account-current-password','#account-code']) $(id).value='';
@@ -60,7 +67,10 @@ export function initAccounts({getState, api, exportBackup, onResume}) {
         ...(value==='recover'?{recovery_code:$('#account-recovery').value}:{}),switch_confirmed:$('#account-switch-confirm').checked});
       clearSecrets();
       if(result.recovery_code)showCode(result);
-      else if(result.username===getState().account?.username){forcedLogin=false;await onResume();dialog.close();}
+      else if(result.username===getState().account?.username||
+        (getState().deployment?.login_required&&!getState().account?.username&&!getState().records.length)){
+        forcedLogin=false;await onResume();dialog.close();
+      }
       else location.reload();
     });
   };
@@ -81,7 +91,7 @@ export function initAccounts({getState, api, exportBackup, onResume}) {
     if(pending||receipt)return;
     forcedLogin=true;clearSecrets();$('#account-mode').value='login';
     $('#account-username').value=getState().account?.username||'';
-    render();message('登录已过期。重新登录同一账号后，当前未保存的填写内容会保留。',true);
+    render();message(getState().account?.username?'登录已过期。重新登录同一账号后，当前未保存的填写内容会保留。':'请先注册或登录个人账号。当前填写内容会保留，登录后可继续保存。',true);
     if(!dialog.open)dialog.showModal();
   }
   return {render,requireLogin};

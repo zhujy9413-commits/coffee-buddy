@@ -55,7 +55,7 @@
 </form></dialog>
 <dialog id="account-dialog" aria-labelledby="account-title">
  <p class="eyebrow">YOUR COFFEE ACCOUNT</p><h2 id="account-title">让记录跟着你。</h2>
- <div id="account-guest"><p class="muted">注册会认领当前浏览器的记录。以后在这一个网站登录，就能换设备继续使用。</p>
+<div id="account-guest"><p class="muted" id="account-guest-hint">注册会认领当前浏览器的记录。以后在这一个网站登录，就能换设备继续使用。</p>
  <label for="account-mode">我要</label><select id="account-mode"><option value="register">创建个人账号</option><option value="login">登录已有账号</option><option value="recover">用恢复码重设密码</option></select>
  <form id="account-form"><label for="account-username">用户名</label><input id="account-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9_]{3,32}" minlength="3" maxlength="32" required><p class="hint">3—32 位字母、数字或下划线，区分大小写，登录和找回时请保持一致。</p>
  <label id="account-password-label" for="account-password">密码</label><input id="account-password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="20" required><p id="account-password-hint" class="hint">8—20 个字符，可以使用空格和中文。建议保存到系统密码管理器。</p>

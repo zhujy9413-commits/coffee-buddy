@@ -1,6 +1,4 @@
-"""Password-protected cloud app with opt-in verified disk storage. No .env is loaded."""
-import base64
-import hmac
+"""Cloud app with personal login and bounded external services. No .env is loaded."""
 import os
 import re
 from http.server import ThreadingHTTPServer
@@ -20,9 +18,6 @@ def cloud_settings(env):
     hostname = env.get('RENDER_EXTERNAL_HOSTNAME', '').strip().lower()
     if not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.onrender\.com', hostname):
         raise ValueError('需要 Render 自动提供的 HTTPS 服务域名')
-    password = env.get('PREVIEW_PASSWORD', '')
-    if not re.fullmatch(r'[A-Za-z0-9_+/=-]{32,128}', password):
-        raise ValueError('请配置至少 32 位的随机测试访问密码')
     if not env.get('AMAP_API_KEY', '').strip():
         raise ValueError('请在云端配置高德 Web 服务 Key')
     if any(env.get(key, '').strip() for key in ('AMAP_JS_API_KEY', 'AMAP_JS_SECURITY_CODE', 'AMAP_JS_ALLOW_EVAL')):
@@ -33,14 +28,13 @@ def cloud_settings(env):
             raise ValueError()
     except ValueError:
         raise ValueError('云端端口配置无效') from None
-    return hostname, password, port
+    return hostname, port
 
 
-def make_cloud_handler(store, hostname, password, backups=None):
+def make_cloud_handler(store, hostname, backups=None):
     # Revalidate the security settings even when this factory is used directly.
-    cloud_settings({'RENDER_EXTERNAL_HOSTNAME': hostname, 'PREVIEW_PASSWORD': password, 'AMAP_API_KEY': 'configured'})
-    parent = make_handler(store, allowed_hosts={hostname})
-    expected = b'Basic ' + base64.b64encode(('coffee:' + password).encode())
+    cloud_settings({'RENDER_EXTERNAL_HOSTNAME': hostname, 'AMAP_API_KEY': 'configured'})
+    parent = make_handler(store, allowed_hosts={hostname}, require_account=True)
     origin = 'https://' + hostname
 
     class Handler(parent):
@@ -49,11 +43,6 @@ def make_cloud_handler(store, hostname, password, backups=None):
             self.connection.settimeout(30)
 
         def prepare(self, mutation=False):
-            self.need_auth = False
-            supplied = self.headers.get('Authorization', '').encode('utf-8')
-            if not hmac.compare_digest(supplied, expected):
-                self.need_auth = True
-                raise AppError('请输入云端测试版的访问凭据', 401)
             if mutation and self.headers.get('Origin') != origin:
                 raise AppError('请求来源无效', 403)
             super().prepare(mutation)
@@ -64,7 +53,7 @@ def make_cloud_handler(store, hostname, password, backups=None):
                 self.reply({'ok': True})
             elif self.path in INSTALL_ASSETS:
                 # iOS can fetch installation artwork outside the signed-in tab.
-                # Only fixed branding assets are public; app pages/APIs stay gated.
+                # Fixed installation assets carry no personal data.
                 self.install_asset(self.path)
             else:
                 super().do_GET()
@@ -78,7 +67,7 @@ def make_cloud_handler(store, hostname, password, backups=None):
                 if backups is not None:
                     deployment = {'mode': 'cloud-personal', 'ephemeral': False, 'notice': PERSISTENT_NOTICE,
                                   'backup': backups.status()}
-                data = dict(data, deployment=deployment)
+                data = dict(data, deployment=dict(deployment, login_required=True))
             super().reply(data, status, content_type)
 
         def send_header(self, keyword, value):
@@ -88,8 +77,6 @@ def make_cloud_handler(store, hostname, password, backups=None):
 
         def end_headers(self):
             self.send_header('X-Robots-Tag', 'noindex, nofollow, noarchive')
-            if getattr(self, 'need_auth', False):
-                self.send_header('WWW-Authenticate', 'Basic realm="Coffee Buddy cloud test", charset="UTF-8"')
             super().end_headers()
 
     return Handler
@@ -97,11 +84,11 @@ def make_cloud_handler(store, hostname, password, backups=None):
 
 def main():
     # Never load .env or open data/web. Runtime secrets are provided by the host.
-    hostname, password, port = cloud_settings(os.environ)
+    hostname, port = cloud_settings(os.environ)
     os.umask(0o077)
     store, backups = open_cloud_store(os.environ)
-    server = ThreadingHTTPServer(('0.0.0.0', port), make_cloud_handler(store, hostname, password, backups))
-    print('Coffee Buddy 云端服务已启动；访问须使用访问凭据。', flush=True)
+    server = ThreadingHTTPServer(('0.0.0.0', port), make_cloud_handler(store, hostname, backups))
+    print('Coffee Buddy 云端服务已启动；使用个人账号登录。', flush=True)
     try:
         if backups:
             backups.start()

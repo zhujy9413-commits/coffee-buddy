@@ -17,16 +17,16 @@ class CloudSettingsTests(unittest.TestCase):
     def test_fails_closed_without_required_cloud_settings(self):
         settings = {'RENDER_EXTERNAL_HOSTNAME': 'coffee-test.onrender.com',
                     'PREVIEW_PASSWORD': 'test-only-password-01234567890123456789', 'AMAP_API_KEY': 'test-key'}
-        self.assertEqual(cloud_settings(settings)[2], 10000)
-        for field in settings:
+        self.assertEqual(cloud_settings(settings)[1], 10000)
+        for field in ['RENDER_EXTERNAL_HOSTNAME', 'AMAP_API_KEY']:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 cloud_settings({**settings, field: ''})
         for host in ['localhost', 'other.example', 'coffee-test.onrender.com.evil.example',
                      'https://coffee-test.onrender.com', 'coffee-test.onrender.com/']:
             with self.subTest(host=host), self.assertRaises(ValueError):
                 cloud_settings({**settings, 'RENDER_EXTERNAL_HOSTNAME': host})
-        for field, value in [('PREVIEW_PASSWORD', 'short'), ('PREVIEW_PASSWORD', 'a'*32+'\n'),
-                             ('PORT', '0'), ('PORT', 'not-a-port'), ('AMAP_JS_ALLOW_EVAL', '1'),
+        self.assertEqual(cloud_settings({k:v for k,v in settings.items() if k != 'PREVIEW_PASSWORD'}), cloud_settings(settings))
+        for field, value in [('PORT', '0'), ('PORT', 'not-a-port'), ('AMAP_JS_ALLOW_EVAL', '1'),
                              ('AMAP_JS_SECURITY_CODE', 'local-secret')]:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 cloud_settings({**settings, field: value})
@@ -45,7 +45,7 @@ class CloudPreviewTests(unittest.TestCase):
         self.host = 'coffee-test.onrender.com'
         self.password = 'test-only-password-01234567890123456789'
         self.auth = 'Basic ' + base64.b64encode(('coffee:'+self.password).encode()).decode()
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), make_cloud_handler(self.store, self.host, self.password))
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), make_cloud_handler(self.store, self.host))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
@@ -82,18 +82,25 @@ class CloudPreviewTests(unittest.TestCase):
         with self.store.connect() as con:
             self.assertEqual(con.execute('SELECT count(*) FROM users').fetchone()[0], 0)
 
-    def test_private_routes_require_password_and_do_not_leak_secrets(self):
+    def test_shared_password_gate_is_removed_but_personal_actions_require_login(self):
         for route in ['/', '/app.js', '/style.css', '/location.js', '/amap-location.js',
-                      '/api/state', '/api/export', '/_AMapService/v4/ip', '/.env', '/healthz/']:
+                      '/api/state', '/accounts.js']:
             with self.subTest(route=route):
                 status, headers, body = self.request(route)
-                self.assertEqual(status, 401)
-                self.assertIn('Basic realm=', headers['WWW-Authenticate'])
-                self.assertNotIn('Set-Cookie', headers)
+                self.assertEqual(status, 200)
+                self.assertNotIn('WWW-Authenticate', headers)
                 self.assertNotIn(self.password.encode(), body)
                 self.assertNotIn(b'test-private-web-key', body)
-        self.assertEqual(self.request('/api/preferences', method='POST', data={})[0], 401)
-        self.assertEqual(self.request('/api/state', auth='Basic invalid')[0], 401)
+        for route in ['/api/preferences', '/api/records', '/api/delete', '/api/import',
+                      '/api/menu-batch', '/api/extract', '/api/nearby']:
+            status, headers, _ = self.request(route, method='POST', origin='https://'+self.host, data={})
+            self.assertEqual(status, 401)
+            self.assertNotIn('WWW-Authenticate', headers)
+        for route in ['/api/export', '/_AMapService/v4/ip']:
+            self.assertEqual(self.request(route)[0],401)
+        for route in ['/.env', '/healthz/']:
+            self.assertEqual(self.request(route)[0],404)
+        self.assertEqual(self.request('/api/state', auth='Basic invalid')[0], 200)
 
     def test_only_installation_branding_is_public_without_creating_a_session(self):
         status, headers, body = self.request('/manifest.webmanifest')
@@ -118,8 +125,8 @@ class CloudPreviewTests(unittest.TestCase):
             self.assertEqual(con.execute('SELECT count(*) FROM users').fetchone()[0], 0)
         for path in ['/icons/', '/icons/../accounts.js', '/icons/not-listed.png',
                      '/manifest.webmanifest/../api/state']:
-            self.assertEqual(self.request(path)[0], 401)
-        self.assertEqual(self.request('/manifest.webmanifest', method='POST', data={})[0], 401)
+            self.assertEqual(self.request(path)[0], 404)
+        self.assertEqual(self.request('/manifest.webmanifest', method='POST', origin='https://'+self.host, data={})[0], 401)
 
     def test_authenticated_page_declares_home_screen_metadata_and_guidance(self):
         status, _, body = self.request('/', auth=self.auth)
@@ -130,6 +137,35 @@ class CloudPreviewTests(unittest.TestCase):
                        'id="install-open"', 'id="install-dialog"', '作为网页 App 打开']:
             self.assertIn(marker, html)
 
+    def test_public_assets_create_no_identity_and_basic_header_grants_no_personal_access(self):
+        for path in ['/','/app.js','/accounts.js','/style.css']:
+            status,headers,_=self.request(path)
+            self.assertEqual(status,200)
+            self.assertNotIn('Set-Cookie',headers)
+        with self.store.connect() as con:
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM users').fetchone()[0],0)
+        self.assertEqual(self.request('/api/export',auth=self.auth)[0],401)
+
+    def test_guests_never_reach_billed_services_and_accounts_are_quota_limited(self):
+        with patch('web_app.extract_photo',return_value={'items':[]}) as vision, patch('web_app.search_cafes',return_value={'cafes':[]}) as maps:
+            for path in ['/api/extract','/api/nearby']:
+                self.assertEqual(self.request(path,method='POST',origin='https://'+self.host,data={})[0],401)
+            vision.assert_not_called();maps.assert_not_called()
+            status,headers,_=self.request('/api/account/register',method='POST',origin='https://'+self.host,
+                data={'username':'quota_tester','password':'CloudTest!123'})
+            self.assertEqual(status,200)
+            cookie=headers['Set-Cookie'].split(';')[0]
+            for _ in range(2):
+                self.assertEqual(self.request('/api/extract',method='POST',origin='https://'+self.host,cookie=cookie,data={})[0],200)
+            self.assertEqual(self.request('/api/extract',method='POST',origin='https://'+self.host,cookie=cookie,data={})[0],429)
+            self.assertEqual(vision.call_count,2)
+            for _ in range(10):
+                self.assertEqual(self.request('/api/nearby',method='POST',origin='https://'+self.host,cookie=cookie,data={'landmark':'虚构地标'})[0],200)
+            self.assertEqual(self.request('/api/nearby',method='POST',origin='https://'+self.host,cookie=cookie,data={'landmark':'虚构地标'})[0],429)
+            self.assertEqual(maps.call_count,10)
+            self.assertEqual(self.request('/api/nearby',method='POST',origin='https://'+self.host,cookie=cookie,data={'mode':'taste'})[0],200)
+            self.assertEqual(self.request('/_AMapService/v4/ip',cookie=cookie)[0],404)
+
     def test_valid_access_has_empty_isolated_data_secure_cookie_and_visible_notice(self):
         status, headers, body = self.request('/api/state', auth=self.auth)
         data = json.loads(body)
@@ -137,11 +173,16 @@ class CloudPreviewTests(unittest.TestCase):
         self.assertEqual(data['records'], [])
         self.assertEqual(data['deployment']['notice'], NOTICE)
         self.assertTrue(data['deployment']['ephemeral'])
+        self.assertTrue(data['deployment']['login_required'])
         self.assertEqual(data['map_location']['provider'], 'browser')
         self.assertNotIn(b'test-private-web-key', body)
         self.assertNotIn(b'unsafe-eval', headers['Content-Security-Policy'].encode())
         for flag in ['Secure', 'HttpOnly', 'SameSite=Strict']:
             self.assertIn(flag, headers['Set-Cookie'])
+        cookie = headers['Set-Cookie'].split(';')[0]
+        status, headers, _ = self.request('/api/account/register', method='POST',
+            origin='https://'+self.host, cookie=cookie, data={'username':'cloud_tester','password':'CloudTest!123'})
+        self.assertEqual(status,200)
         cookie = headers['Set-Cookie'].split(';')[0]
         status, _, body = self.request('/api/preferences', auth=self.auth, method='POST',
             origin='https://'+self.host, cookie=cookie, data={'city': '测试城市'})
@@ -166,7 +207,7 @@ class CloudPreviewTests(unittest.TestCase):
         self.thread.join()
         backups = DailyBackups(self.store.path, Path(self.folder.name) / 'backups')
         backups.snapshot()
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), make_cloud_handler(self.store, self.host, self.password, backups))
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), make_cloud_handler(self.store, self.host, backups))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         status, headers, body = self.request('/api/state', auth=self.auth)
