@@ -110,7 +110,8 @@ def validate_entry(data):
     item["reaction"] = data.get("reaction", "neutral") if item["kind"] == "tasting" else "neutral"
     if item["kind"] not in {"tasting", "menu"} or item["roast"] not in ROASTS:
         raise AppError("记录类型、饮品或烘焙度无效")
-    if item["reaction"] not in {"like", "neutral", "dislike"}:
+    # Legacy neutral means undecided; an explicit average rating is separate.
+    if item["reaction"] not in {"like", "okay", "neutral", "dislike"}:
         raise AppError("喜好选项无效")
     item["label_flavors"] = tags(data.get("label_flavors", []))
     item["tasted_flavors"] = tags(data.get("tasted_flavors", []))
@@ -351,11 +352,31 @@ class Amap:
         return list(found.values())
 
 
+def cafe_link_issue(record):
+    if not record.get('cafe'):
+        return '请补充具体分店名称和地址，或从地图店铺进入记录。'
+    if not (record.get('address') or record.get('provider_id')):
+        return '缺少分店地址或地图关联，暂未用于具体分店匹配。'
+    return None
+
+
+def unlinked_records(entries, prefs, brew):
+    preference = coffee_preference(prefs)
+    rows = [r for r in entries if r['brew'] == brew and cafe_link_issue(r)
+            and (preference == 'any' or brew_category(brew, prefs, r) == preference)]
+    rows.sort(key=lambda r: (r['observed_on'], r.get('updated_at', '')), reverse=True)
+    return {'unlinked_count': len(rows), 'unlinked_records': [
+        {'record_id': r['id'], 'product': r['product'], 'cafe': r['cafe'],
+         'observed_on': r['observed_on'], 'issue': cafe_link_issue(r),
+         'feedback': tasting_feedback(r) if r['kind'] == 'tasting' else None}
+        for r in rows[:5]]}
+
+
 def historical_cafes(entries, center=None):
     found = {}
     for entry in sorted(entries, key=lambda r: (r["observed_on"], r.get("updated_at", "")), reverse=True):
         name, address, provider = entry.get("cafe", ""), entry.get("address", ""), entry.get("provider_id", "")
-        if not name or not (address or provider):
+        if cafe_link_issue(entry):
             continue  # An unlocated shop name cannot establish a specific branch.
         cafe_id = provider or "history-" + hashlib.sha256((name + "\n" + address).encode()).hexdigest()[:20]
         point = entry.get("location")
@@ -393,7 +414,8 @@ def search_cafes(data, state, amap=None):
         cafes = historical_cafes(entries)
         return {"cafes": recommend(cafes, entries, prefs, brew, mode), "mode": mode,
                 "scope_label": "已保存的店铺资料", "center_label": "",
-                "notice": "依据已有豆单和饮用记录推荐，未查询实时地图；距离与当前在售情况待确认。"}
+                "notice": "依据已有豆单和饮用记录推荐，未查询实时地图；距离与当前在售情况待确认。",
+                **unlinked_records(entries, prefs, brew)}
     amap = amap or Amap()
     if mode == "taste" and not getattr(amap, "key", "configured"):
         result = search_cafes({"mode": "taste", "brew": brew}, state)
@@ -409,10 +431,13 @@ def search_cafes(data, state, amap=None):
         cafes = merge_cafes(cafes, historical_cafes(entries, center))
         notice = "口味优先，距离仅作参考；包含较远的历史店铺，历史资料不保证当前在售。"
     return {"cafes": recommend(cafes, entries, prefs, brew, mode), "mode": mode,
-            "scope_label": "以选定地点为中心" if mode != "taste" else "地图候选与已有店铺资料", "center_label": label, "notice": notice}
+            "scope_label": "以选定地点为中心" if mode != "taste" else "地图候选与已有店铺资料", "center_label": label, "notice": notice,
+            **unlinked_records(entries, prefs, brew)}
 
 
 def same_cafe(record, cafe):
+    if cafe_link_issue(record):
+        return False
     if record.get("provider_id"):
         return record["provider_id"] == cafe["id"]
     return bool(record.get("address")) and record["cafe"] == cafe["name"] and record["address"] == cafe["address"]
@@ -436,6 +461,11 @@ def matches_flavor(flavor, values):
                     continue
                 return True
     return False
+
+
+def tasting_feedback(record):
+    return {'reaction': record['reaction'], 'observed_on': record['observed_on'],
+            'tasted_flavors': list(record.get('tasted_flavors', []))}
 
 
 def recommend(cafes, entries, prefs, brew, mode="taste"):
@@ -473,13 +503,19 @@ def recommend(cafes, entries, prefs, brew, mode="taste"):
                 reasons.append('记录的' + r['roast'] + '符合你的烘焙偏好')
                 score += 1
             if score == 0:
-                reasons.append("有这家店的产品资料，口味是否适合还需要尝试")
+                if latest and latest['reaction'] == 'okay':
+                    reasons.append('上次评价一般，未增加喜欢优先级')
+                elif latest:
+                    reasons.append('上次还说不准，可参考实际感受再选择')
+                else:
+                    reasons.append("有这家店的产品资料，口味是否适合还需要尝试")
             if not r.get('bean') or not r.get('batch'):
                 reasons.append('豆子或批次未记全，同名饮品可能更换配方，请向店铺核对')
             age = (date.today() - date.fromisoformat(r["observed_on"])).days
             products.append({"record_id": r["id"], "product": r["product"], "bean": r["bean"], "brew": brew,
                              'batch': r.get('batch', ''), 'tasted_flavors': latest.get('tasted_flavors', []) if latest else [],
                              'feedback_on': latest['observed_on'] if latest else None,
+                             'feedback': tasting_feedback(latest) if latest else None,
                              "flavors": r["label_flavors"], "roast": r["roast"], "reasons": reasons, "score": score,
                              "source": r["source_note"] or "你的饮用记录", "observed_on": r["observed_on"],
                              "availability": "历史饮用记录，当前在售情况待确认" if r["kind"] == "tasting" else "豆单资料距今 %s 天，当前在售情况待确认" % age})

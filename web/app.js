@@ -1,5 +1,5 @@
 import {getCurrentLocation, prefersDeviceLocation} from './location.js';
-import {tastingDraft} from './journal.js';
+import {tastingDraft, reactionLabels, feedbackLines, shopLinkHint} from './journal.js';
 import {initMenuBatch} from './menu-batch.js';
 import {initAccounts} from './accounts.js';
 const $ = s => document.querySelector(s);
@@ -88,8 +88,8 @@ function editRecord(id) {
 function renderHistory() {
   const query=$('#filter-text').value.trim().toLowerCase(); const brew=$('#filter-brew').value, reaction=$('#filter-reaction').value, roast=$('#filter-roast').value;
   const rows=state.records.filter(r=>(!brew||r.brew===brew)&&(!reaction||(r.kind==='tasting'&&r.reaction===reaction))&&(!roast||r.roast===roast)&&(!query||[r.product,r.bean,r.cafe,r.address,r.note,r.label_flavors.join(' '),r.tasted_flavors.join(' ')].join(' ').toLowerCase().includes(query)));
-  const reactions={like:'♡ 喜欢',neutral:'还说不准',dislike:'不太喜欢'};
-  $('#history-results').innerHTML=rows.length?rows.map(r=>`<article class="journal-card"><div class="card-head"><div><small>${esc(r.observed_on)} · ${r.kind==='menu'?'豆单资料':esc(r.brew)}</small><h3>${esc(r.product)}</h3><small>${esc(r.cafe||'未填写店铺')}${r.bean?' · '+esc(r.bean):''}</small></div><span class="pill ${esc(r.reaction)}">${r.kind==='menu'?'待尝试':reactions[r.reaction]}</span></div><div class="tags">${formatTags([r.roast,...r.label_flavors])}</div>${r.tasted_flavors.length?`<p>实际喝到：${esc(r.tasted_flavors.join('、'))}</p>`:''}${r.note?`<p>${esc(r.note)}</p>`:''}${r.source_note?`<p class="hint">来源：${esc(r.source_note)}</p>`:''}<div class="card-actions"><button class="secondary" data-new-tasting="${r.id}">${r.kind==='menu'?'喝完记一杯':'再喝记一杯'}</button><button class="quiet" data-edit="${r.id}">修改记录</button><button class="quiet danger" data-delete="${r.id}">删除</button></div></article>`).join(''):`<div class="empty"><span class="empty-mark">◡</span><h3>${state.records.length?'还没有符合筛选条件的记录':'你的第一杯，值得被记住'}</h3><p>${state.records.length?'换个关键词或筛选条件试试。':'从店名、喝了什么和喜不喜欢开始。'}</p></div>`;
+  const reactions={...reactionLabels,like:'♡ 喜欢'};
+  $('#history-results').innerHTML=rows.length?rows.map(r=>`<article class="journal-card"><div class="card-head"><div><small>${esc(r.observed_on)} · ${r.kind==='menu'?'豆单资料':esc(r.brew)}</small><h3>${esc(r.product)}</h3><small>${esc(r.cafe||'未填写店铺')}${r.bean?' · '+esc(r.bean):''}</small></div><span class="pill ${esc(r.reaction)}">${r.kind==='menu'?'待尝试':reactions[r.reaction]}</span></div><div class="tags">${formatTags([r.roast,...r.label_flavors])}</div>${r.tasted_flavors.length?`<p>实际喝到：${esc(r.tasted_flavors.join('、'))}</p>`:''}${shopLinkHint(r)?`<p class="hint branch-hint">${esc(shopLinkHint(r))}</p>`:''}${r.note?`<p>${esc(r.note)}</p>`:''}${r.source_note?`<p class="hint">来源：${esc(r.source_note)}</p>`:''}<div class="card-actions"><button class="secondary" data-new-tasting="${r.id}">${r.kind==='menu'?'喝完记一杯':'再喝记一杯'}</button><button class="quiet" data-edit="${r.id}">修改记录</button><button class="quiet danger" data-delete="${r.id}">删除</button></div></article>`).join(''):`<div class="empty"><span class="empty-mark">◡</span><h3>${state.records.length?'还没有符合筛选条件的记录':'你的第一杯，值得被记住'}</h3><p>${state.records.length?'换个关键词或筛选条件试试。':'从店名、喝了什么和喜不喜欢开始。'}</p></div>`;
   $$('[data-new-tasting]').forEach(b=>b.onclick=()=>startTasting(state.records.find(r=>r.id===b.dataset.newTasting)));
   $$('[data-edit]').forEach(b=>b.onclick=()=>editRecord(b.dataset.edit));
   $$('[data-delete]').forEach(b=>b.onclick=async()=>{
@@ -220,9 +220,24 @@ function confirmApproximateLocation(point) {
 $('#landmark-form').addEventListener('submit',e=>{e.preventDefault();center={landmark:$('#landmark').value.trim()};searchNearby();});
 $('#search-city').addEventListener('input',()=>{++searchVersion;center=null;$('#place-choices').replaceChildren();});
 function distanceLabel(cafe) {const value=cafe.distance;return Number.isFinite(value)?(value>=1000?(value/1000).toFixed(1)+' km':value+' m'):'距离待确认';}
+function feedbackHtml(feedback) {
+  const lines=feedbackLines(feedback);
+  return lines.length?`<div class="feedback-summary">${lines.map(line=>`<p>${esc(line)}</p>`).join('')}</div>`:'';
+}
+function unlinkedHtml() {
+  const rows=resultMeta.unlinked_records||[];
+  if(!rows.length)return '';
+  return `<aside class="unlinked-records" aria-label="需要补充分店的记录"><h3>有 ${esc(resultMeta.unlinked_count)} 条记录还差分店信息</h3><p class="hint">记录已保存。补充具体分店地址或地图关联后，才能用于店铺匹配；不会按品牌套用到其他分店。</p>${rows.map(r=>`<article><strong>${esc(r.product)}</strong><p class="hint">${esc(r.cafe||'尚未填写店铺')} · ${esc(r.observed_on)}</p>${feedbackHtml(r.feedback)}<p class="hint">${esc(r.issue)}</p><button class="secondary" data-link-record="${esc(r.record_id)}">补充分店信息</button></article>`).join('')}${resultMeta.unlinked_count>rows.length?'<p class="hint">这里展示最近 5 条，其余可在「我的记录」查看。</p>':''}</aside>`;
+}
 function renderCafes() {
   const count=cafes.filter(c=>c.products.length).length;
-  $('#nearby-results').innerHTML=cafes.length?`<p class="results-head">${esc(resultMeta.scope_label||'候选店铺')} · ${cafes.length} 家店 · ${count} 家有产品资料<br>${esc(resultMeta.notice||'')}</p>`+cafes.map((c,i)=>`<article class="cafe-card"><div class="card-head"><div><small>${esc(c.source)}</small><h3>${esc(c.name)}</h3><small>${esc(c.address)}</small></div><span class="distance">${esc(distanceLabel(c))}</span></div>${c.products.length?`<div class="products">${c.products.map(p=>`<div class="product"><strong>${esc(p.product)}</strong>${p.bean||p.batch?`<p class="hint">${esc(p.bean)}${p.batch?' · '+esc(p.batch):''}</p>`:''}<div class="tags">${formatTags([p.brew,p.roast,...p.flavors])}</div><p>${p.reasons.map(esc).join('；')}</p><p class="hint">${esc(p.observed_on)} · ${esc(p.source)}<br>${esc(p.availability)}</p><button class="quiet" data-try-record="${p.record_id}" data-cafe-index="${i}">喝完记一杯 ↗</button></div>`).join('')}</div>`:'<p class="no-menu">店铺候选 · 暂无可推荐的产品资料，尚不能判断是否符合你的口味。</p>'}<div class="card-actions"><button class="secondary" data-cafe="${i}" data-kind="tasting">在这家记一杯</button><button class="quiet" data-cafe="${i}" data-kind="menu">补充豆单</button></div></article>`).join(''):`<div class="empty"><h3>${resultMeta.mode==='taste'?'还没有可参考的店铺资料':'暂时没有找到合适的店铺'}</h3><p>${resultMeta.mode==='taste'?'先保存一条带店铺名称、地址或地图关联的饮用记录，也可以选择地点扩展查询。':'换一个地点或找店方式试试。'}</p><p class="hint">${esc(resultMeta.notice||'')}</p></div>`;
+  const cards=cafes.map((c,i)=>`<article class="cafe-card"><div class="card-head"><div><small>${esc(c.source)}</small><h3>${esc(c.name)}</h3><small>${esc(c.address)}</small></div><span class="distance">${esc(distanceLabel(c))}</span></div>${c.products.length?`<div class="products">${c.products.map(p=>`<div class="product"><strong>${esc(p.product)}</strong>${p.bean||p.batch?`<p class="hint">${esc(p.bean)}${p.batch?' · '+esc(p.batch):''}</p>`:''}<div class="tags">${formatTags([p.brew,p.roast,...p.flavors])}</div>${feedbackHtml(p.feedback)}<p>${p.reasons.map(esc).join('；')}</p><p class="hint">${esc(p.observed_on)} · ${esc(p.source)}<br>${esc(p.availability)}</p><button class="quiet" data-try-record="${esc(p.record_id)}" data-cafe-index="${i}">喝完记一杯 ↗</button></div>`).join('')}</div>`:'<p class="no-menu">店铺候选 · 暂无可推荐的产品资料，尚不能判断是否符合你的口味。</p>'}<div class="card-actions"><button class="secondary" data-cafe="${i}" data-kind="tasting">在这家记一杯</button><button class="quiet" data-cafe="${i}" data-kind="menu">补充豆单</button></div></article>`).join('');
+  const empty=!(resultMeta.unlinked_count||cafes.length)?`<div class="empty"><h3>${resultMeta.mode==='taste'?'还没有可参考的店铺资料':'暂时没有找到合适的店铺'}</h3><p>${resultMeta.mode==='taste'?'先保存一条带店铺名称、地址或地图关联的饮用记录，也可以选择地点扩展查询。':'换一个地点或找店方式试试。'}</p><p class="hint">${esc(resultMeta.notice||'')}</p></div>`:'';
+  $('#nearby-results').innerHTML=`<p class="results-head">${esc(resultMeta.scope_label||'候选店铺')} · ${cafes.length} 家店 · ${count} 家有产品资料<br>${esc(resultMeta.notice||'')}</p>`+unlinkedHtml()+cards+empty;
+  $$('[data-link-record]').forEach(b=>b.onclick=()=>{
+    editRecord(b.dataset.linkRecord);
+    $(state.records.find(r=>r.id===b.dataset.linkRecord)?.cafe?'#address':'#cafe').focus();
+  });
   $$('[data-cafe]').forEach(b=>b.onclick=()=>prefillCafe(cafes[Number(b.dataset.cafe)],b.dataset.kind));
   $$('[data-try-record]').forEach(b=>b.onclick=()=>{
     const record=state.records.find(r=>r.id===b.dataset.tryRecord); if(!record)return;

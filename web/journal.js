@@ -1,3 +1,18 @@
+export const reactionLabels = Object.freeze({like:'喜欢',okay:'一般',neutral:'还说不准',dislike:'不太喜欢'});
+
+export function feedbackLines(feedback) {
+  if(!feedback)return [];
+  const lines=[`上次评价：${reactionLabels[feedback.reaction]||'还说不准'} · ${feedback.observed_on}`];
+  if(feedback.tasted_flavors?.length)lines.push(`实际喝到：${feedback.tasted_flavors.join('、')}`);
+  return lines;
+}
+
+export function shopLinkHint(record) {
+  if(!record.cafe)return '尚未填写店铺，暂不参与具体分店推荐。';
+  if(!record.address&&!record.provider_id)return '已保存体验；补充分店地址或地图关联后，才能参与具体分店匹配。';
+  return '';
+}
+
 // A new tasting copies product facts, never the old entry ID or judgment.
 export function tastingDraft(record, today) {
   const fields=['product','bean','roaster','origin','processing','batch','roast','brew','brew_category','cafe','address','provider_id','source_note'];

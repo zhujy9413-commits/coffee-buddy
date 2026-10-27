@@ -2,7 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('./web/journal.js',import.meta.url),'utf8');
-const {tastingDraft,photoMenuDraft}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const {tastingDraft,photoMenuDraft,reactionLabels,feedbackLines,shopLinkHint}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+
+test('explicit average and legacy undecided have distinct labels, including actual taste',()=>{
+  assert.equal(reactionLabels.okay,'一般');
+  assert.equal(reactionLabels.neutral,'还说不准');
+  assert.deepEqual(feedbackLines({reaction:'okay',observed_on:'2026-01-01',tasted_flavors:['微焦','微苦']}),['上次评价：一般 · 2026-01-01','实际喝到：微焦、微苦']);
+  assert.deepEqual(feedbackLines({reaction:'neutral',observed_on:'2026-01-01',tasted_flavors:[]}),['上次评价：还说不准 · 2026-01-01']);
+  assert.deepEqual(feedbackLines(null),[]);
+});
+
+test('only missing branch information prompts for linking, without requiring device coordinates',()=>{
+  assert.match(shopLinkHint({}),/尚未填写店铺/);
+  assert.match(shopLinkHint({cafe:'测试店'}),/地址或地图关联/);
+  assert.equal(shopLinkHint({cafe:'测试店',address:'测试地址'}),'');
+  assert.equal(shopLinkHint({cafe:'测试店',provider_id:'test-poi'}),'');
+});
 
 test('menu becomes a separate tasting without carrying a prior judgment or date',()=>{
   const old={id:'old-entry',kind:'menu',product:'豆单 A',bean:'豆 A',batch:'批次 1',brew:'手冲',brew_category:'black',

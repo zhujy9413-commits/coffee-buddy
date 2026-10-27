@@ -175,6 +175,19 @@ print(json.dumps([store.session(owner),store.state(owner)]))
             self.store.delete(self.other, row['id'])
         self.assertEqual(error.exception.status, 404)
 
+    def test_average_and_legacy_undecided_roundtrip_without_rewriting_originals(self):
+        average = self.store.save(self.owner, {'product':'明确一般', 'reaction':'okay', 'tasted_flavors':['微苦']})
+        undecided = self.store.save(self.owner, {'product':'旧版中性', 'reaction':'neutral'})
+        before = self.store.state(self.owner)
+        backup = dict(format='coffee-buddy-web-v1', records=before['records'])
+        self.store.import_records(self.other, backup)
+        self.store.import_records(self.other, backup)
+        records = {r['id']:r for r in self.new_store().state(self.other)['records']}
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[average['id']]['reaction'], 'okay')
+        self.assertEqual(records[undecided['id']]['reaction'], 'neutral')
+        self.assertEqual(self.store.state(self.owner), before)
+
     def test_bulk_retry_conflict_and_validation_are_atomic(self):
         rows = [menu(product='测试 A'), menu(product='测试 B')]
         self.assertEqual(self.store.save_menu_batch(self.owner, {'items': rows})['created'], 2)

@@ -19,3 +19,11 @@
 @media(max-width:760px){#menu-batch-dialog button,.menu-draft summary,.menu-reviewed{min-height:44px}.menu-draft summary{padding:12px 0}.menu-reviewed{cursor:pointer}}
 
 .top-actions{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:4px}#account-open{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}#account-dialog{max-height:calc(100dvh - 32px);overflow:auto}#account-dialog input[type=checkbox]{width:18px;height:18px;flex-shrink:0;accent-color:var(--green)}#account-code{font-family:ui-monospace,monospace;overflow-wrap:anywhere}#account-known summary{min-height:44px;padding-top:16px;cursor:pointer}#account-switch{padding:12px;border:1px solid var(--line);border-radius:8px;margin-top:16px}@media(max-width:420px){.top{padding:16px 20px;gap:8px;align-items:flex-start}.top-actions{max-width:125px}.top-actions .quiet{min-height:36px;font-size:11px;padding:4px 6px}#account-open{max-width:125px}#account-dialog{padding:22px}#account-dialog button{min-height:44px}}
+.feedback-summary{margin:12px 0;padding:10px 13px;border-left:3px solid #aebc96;background:#f0f3e9;border-radius:0 7px 7px 0;overflow-wrap:anywhere}
+.feedback-summary p{margin:3px 0;font-size:12px}
+.unlinked-records{margin:20px 0;border:1px solid var(--line);border-radius:12px;background:#f1f2e9;padding:20px;overflow-wrap:anywhere}
+.unlinked-records h3{font-size:16px;margin-bottom:6px}
+.unlinked-records article{padding:15px 0;border-top:1px solid var(--line);margin-top:15px}
+.unlinked-records article:last-of-type{padding-bottom:0}
+.unlinked-records strong{font-weight:500;font-size:14px}
+.branch-hint{padding:9px 12px;background:#f0f3e9;border-radius:6px;overflow-wrap:anywhere}
