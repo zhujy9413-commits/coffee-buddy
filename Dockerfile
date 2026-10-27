@@ -6,6 +6,8 @@ COPY docker_entrypoint.py cloud_preview.py cloud_storage.py postgres_store.py st
 COPY requirements-cloud.txt ./
 RUN pip install --no-cache-dir -r requirements-cloud.txt
 COPY web/index.html web/app.js web/style.css web/location.js web/amap-location.js web/journal.js web/menu-drafts.js web/menu-batch.js web/accounts.js ./web/
+COPY web/manifest.webmanifest ./web/
+COPY web/icons/icon-180.png web/icons/icon-192.png web/icons/icon-512.png ./web/icons/
 # The entrypoint creates the private disk subdirectory and drops all root
 # privileges before opening the database or accepting any HTTP connections.
 CMD ["python", "docker_entrypoint.py"]

@@ -18,6 +18,13 @@ from map_location import location_config, proxy_location_request, allow_sdk_eval
 from accounts import Accounts
 
 ROOT = Path(__file__).resolve().parent
+INSTALL_ASSETS = {
+    '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json; charset=utf-8'),
+    '/apple-touch-icon.png': ('icons/icon-180.png', 'image/png'),
+    '/icons/icon-180.png': ('icons/icon-180.png', 'image/png'),
+    '/icons/icon-192.png': ('icons/icon-192.png', 'image/png'),
+    '/icons/icon-512.png': ('icons/icon-512.png', 'image/png'),
+}
 
 
 def load_env():
@@ -117,6 +124,8 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
                     self.reply(body, content_type=content_type)
                 elif path == "/api/export":
                     self.reply(dict(format="coffee-buddy-web-v1", **store.state(self.owner)))
+                elif path in INSTALL_ASSETS:
+                    self.install_asset(path)
                 elif path in {"/", "/app.js", "/style.css", "/location.js", "/amap-location.js", "/journal.js", "/menu-drafts.js", "/menu-batch.js", "/accounts.js"}:
                     file = ROOT / "web" / ("index.html" if path == "/" else path[1:])
                     self.reply(file.read_bytes(), content_type=mimetypes.guess_type(file.name)[0] + "; charset=utf-8")
@@ -124,6 +133,10 @@ def make_handler(store, allowed_hosts=None, session_cookie='coffee_session'):
                     raise AppError("页面不存在", 404)
             except AppError as exc:
                 self.reply({"error": str(exc)}, exc.status)
+
+        def install_asset(self, path):
+            relative, content_type = INSTALL_ASSETS[path]
+            self.reply((ROOT / 'web' / relative).read_bytes(), content_type=content_type)
 
         def do_POST(self):
             try:

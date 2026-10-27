@@ -303,3 +303,14 @@ $('#photo-batch').onclick=()=>{if(menuBatch.addPhotoItems(photoItems,{image:phot
 const accountsUI=initAccounts({getState:()=>state,api,exportBackup,onResume:async()=>{await refresh();toast('已重新登录，尚未保存的填写内容已保留。');}});
 resetForm();
 refresh().catch(e=>{status('#location-status','无法连接本地服务：'+e.message,true);toast('加载失败，请确认本地服务正在运行后刷新页面。');});
+
+// Installation is a user gesture in Safari; only show guidance in browser mode.
+const standaloneDisplay=window.matchMedia('(display-mode: standalone)');
+function syncInstallButton(){ $('#install-open').hidden=standaloneDisplay.matches||window.navigator.standalone===true; }
+syncInstallButton();
+standaloneDisplay.addEventListener('change',syncInstallButton);
+$('#install-open').onclick=()=>{status('#install-status','');$('#install-dialog').showModal();};
+$('#install-copy').onclick=async()=>{
+  try{await navigator.clipboard.writeText(location.origin+'/');status('#install-status','链接已复制，在 iPhone Safari 中打开即可。');}
+  catch{status('#install-status','请从浏览器地址栏复制当前网址，在 iPhone Safari 中打开。');}
+};

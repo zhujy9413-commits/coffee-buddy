@@ -27,3 +27,9 @@
 .unlinked-records article:last-of-type{padding-bottom:0}
 .unlinked-records strong{font-weight:500;font-size:14px}
 .branch-hint{padding:9px 12px;background:#f0f3e9;border-radius:6px;overflow-wrap:anywhere}
+body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.install-button{margin:12px 0 0;padding-left:0;font-size:12px;min-height:44px}
+.install-steps{padding-left:22px;font-size:14px;line-height:1.9}
+.install-steps li{margin:12px 0}
+#install-dialog{max-height:calc(100dvh - 32px);overflow:auto}
+#install-dialog .dialog-actions{flex-wrap:wrap}

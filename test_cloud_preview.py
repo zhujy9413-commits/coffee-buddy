@@ -82,7 +82,7 @@ class CloudPreviewTests(unittest.TestCase):
         with self.store.connect() as con:
             self.assertEqual(con.execute('SELECT count(*) FROM users').fetchone()[0], 0)
 
-    def test_all_other_routes_require_password_and_do_not_leak_secrets(self):
+    def test_private_routes_require_password_and_do_not_leak_secrets(self):
         for route in ['/', '/app.js', '/style.css', '/location.js', '/amap-location.js',
                       '/api/state', '/api/export', '/_AMapService/v4/ip', '/.env', '/healthz/']:
             with self.subTest(route=route):
@@ -94,6 +94,41 @@ class CloudPreviewTests(unittest.TestCase):
                 self.assertNotIn(b'test-private-web-key', body)
         self.assertEqual(self.request('/api/preferences', method='POST', data={})[0], 401)
         self.assertEqual(self.request('/api/state', auth='Basic invalid')[0], 401)
+
+    def test_only_installation_branding_is_public_without_creating_a_session(self):
+        status, headers, body = self.request('/manifest.webmanifest')
+        self.assertEqual(status, 200)
+        self.assertIn('application/manifest+json', headers['Content-Type'])
+        manifest = json.loads(body)
+        self.assertEqual(manifest['display'], 'standalone')
+        self.assertEqual(manifest['start_url'], '/')
+        self.assertEqual(manifest['short_name'], '咖啡搭子')
+        self.assertNotIn('Set-Cookie', headers)
+        for path, side in [('/apple-touch-icon.png',180), ('/icons/icon-180.png',180),
+                           ('/icons/icon-192.png',192), ('/icons/icon-512.png',512)]:
+            with self.subTest(path=path):
+                status, headers, image = self.request(path)
+                self.assertEqual(status, 200)
+                self.assertEqual(headers['Content-Type'], 'image/png')
+                self.assertEqual(image[:8], b'\x89PNG\r\n\x1a\n')
+                self.assertEqual(int.from_bytes(image[16:20], 'big'), side)
+                self.assertEqual(int.from_bytes(image[20:24], 'big'), side)
+                self.assertNotIn('Set-Cookie', headers)
+        with self.store.connect() as con:
+            self.assertEqual(con.execute('SELECT count(*) FROM users').fetchone()[0], 0)
+        for path in ['/icons/', '/icons/../accounts.js', '/icons/not-listed.png',
+                     '/manifest.webmanifest/../api/state']:
+            self.assertEqual(self.request(path)[0], 401)
+        self.assertEqual(self.request('/manifest.webmanifest', method='POST', data={})[0], 401)
+
+    def test_authenticated_page_declares_home_screen_metadata_and_guidance(self):
+        status, _, body = self.request('/', auth=self.auth)
+        self.assertEqual(status, 200)
+        html = body.decode()
+        for marker in ['rel="manifest"', 'apple-mobile-web-app-capable',
+                       'apple-mobile-web-app-title', 'rel="apple-touch-icon"',
+                       'id="install-open"', 'id="install-dialog"', '作为网页 App 打开']:
+            self.assertIn(marker, html)
 
     def test_valid_access_has_empty_isolated_data_secure_cookie_and_visible_notice(self):
         status, headers, body = self.request('/api/state', auth=self.auth)

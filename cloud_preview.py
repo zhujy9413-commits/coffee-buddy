@@ -6,7 +6,7 @@ import re
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from web_app import make_handler
+from web_app import INSTALL_ASSETS, make_handler
 from web_core import AppError
 from cloud_storage import open_cloud_store
 
@@ -62,6 +62,10 @@ def make_cloud_handler(store, hostname, password, backups=None):
             # Render health checks reveal no records or credentials and create no sessions.
             if self.path == '/healthz':
                 self.reply({'ok': True})
+            elif self.path in INSTALL_ASSETS:
+                # iOS can fetch installation artwork outside the signed-in tab.
+                # Only fixed branding assets are public; app pages/APIs stay gated.
+                self.install_asset(self.path)
             else:
                 super().do_GET()
 
