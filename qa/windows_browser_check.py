@@ -172,7 +172,8 @@ def run_browser(browser, channel, origin):
         page.locator('#search-mode').select_option('taste')
         page.locator('#taste-search').click()
         expect(page.locator('#nearby-results')).to_contain_text(product)
-        expect(page.locator('#nearby-results')).to_contain_text('喜欢过这款')
+        expect(page.locator('#nearby-results .feedback-summary')).to_contain_text('上次评价：喜欢')
+        expect(page.locator('#nearby-results .feedback-summary')).to_contain_text('实际喝到：柑橘、微酸')
         check(True, 'saved feedback appears in history-based recommendation')
         shot('recommendation')
 
