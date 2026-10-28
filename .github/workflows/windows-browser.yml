@@ -1,0 +1,34 @@
+name: Windows browser compatibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browsers:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+      OUTPUT_DIR: qa-artifacts/windows
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test-only browser driver
+        run: python -m pip install playwright
+      - name: Test real Windows Chrome and Edge with disposable data
+        run: python qa/windows_browser_check.py
+      - name: Preserve compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-browser-evidence
+          path: qa-artifacts/windows/
+          retention-days: 3
